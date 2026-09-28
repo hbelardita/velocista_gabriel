@@ -35,9 +35,9 @@ enum class TrackPolarity {
 
 class LineFollowerController {
 public:
-    static const uint8_t BASE_SPEED = 160;
+    static const uint8_t BASE_SPEED = 135;
     static const uint8_t TRIM_RIGHT = 20;
-    static const uint8_t CURVE_SPEED = 100; // ~39.2% PWM (~35-40% PWM)
+    static const uint8_t CURVE_SPEED = 0; // Pivote sobre rueda interna detenida (giro cerrado para curva R30)
 
     explicit LineFollowerController(TrackPolarity polarity = TrackPolarity::WHITE_LINE)
         : state_(RobotState::STANDBY),
@@ -72,7 +72,12 @@ public:
     // Cumple con el Reglamento de Carreras y ADRs 0001, 0002, 0003:
     // - Art 2.2.3 & 4.1.1: El robot permanece inmóvil en STANDBY mientras se mantiene presionado el pulsador de largada.
     // - Art 2.2.7 & 4.1.2: Al soltarse el pulsador, pasa inmediatamente a RACING y enciende el indicador luminoso.
-    // - Tracción diferencial hacia adelante sin contramarcha ni freno motor agresivo (ADR 0002).
+    // - Topología a horcajadas (línea en el medio):
+    //   * !left && !right: centrado en recta (ambos en fondo) -> velocidad crucero BASE_SPEED con trim.
+    //   * !left && right: sensor derecho toca línea -> giro cerrado a la derecha (rueda interna a 0).
+    //   * left && !right: sensor izquierdo toca línea -> giro cerrado a la izquierda (rueda interna a 0).
+    //   * left && right: cruce transversal -> avance recto continuo.
+    // - Tracción diferencial hacia adelante sin contramarcha (ADR 0002).
     void update(bool buttonPressed, const SensorInputs& sensors, uint32_t currentTimeMs) {
         (void)currentTimeMs;
 
@@ -93,20 +98,23 @@ public:
             outputs_.motors.leftForward = true;
             outputs_.motors.rightForward = true;
 
-            if (sensors.leftDetected && sensors.rightDetected) {
-                // Centrado: avance recto a velocidad base con compensación de trim derecho
+            if (!sensors.leftDetected && !sensors.rightDetected) {
+                // Centrado: ambos sensores en fondo (línea en el medio) -> avance recto
                 outputs_.motors.leftPwm = BASE_SPEED;
                 outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
             } else if (!sensors.leftDetected && sensors.rightDetected) {
-                // Desvío a la izquierda: rueda interna (derecha) frena a CURVE_SPEED, rueda externa a velocidad base
+                // Curva a la derecha / desvío a la izquierda: rueda interna (derecha) detenida a CURVE_SPEED (0)
                 outputs_.motors.leftPwm = BASE_SPEED;
                 outputs_.motors.rightPwm = CURVE_SPEED;
             } else if (sensors.leftDetected && !sensors.rightDetected) {
-                // Desvío a la derecha: rueda interna (izquierda) frena a CURVE_SPEED, rueda externa a velocidad base con trim
+                // Curva a la izquierda / desvío a la derecha: rueda interna (izquierda) detenida a CURVE_SPEED (0)
                 outputs_.motors.leftPwm = CURVE_SPEED;
                 outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
+            } else {
+                // Cruce transversal / marca de largada (ambos sensores detectan línea) -> avance recto continuo
+                outputs_.motors.leftPwm = BASE_SPEED;
+                outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
             }
-            // Nota: Pérdida total de ambos sensores será gestionada por el módulo de Despiste y Rescate (Issue 04)
         }
     }
 
