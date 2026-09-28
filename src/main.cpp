@@ -53,6 +53,114 @@ void applyOutputs(const ControllerOutputs& outputs) {
   }
 }
 
+#ifdef DEBUG_MODE
+const uint8_t DEBUG_MOTOR_PWM = 150;
+bool telemetryActive = false;
+unsigned long lastTelemetryMs = 0;
+
+void printDebugMenu() {
+  Serial.println(F("\n=========================================="));
+  Serial.println(F("   VELOCISTA GABRIEL - MODO DEBUG"));
+  Serial.println(F("=========================================="));
+  Serial.println(F("[1] Motor Izquierdo adelante (PWM 150)"));
+  Serial.println(F("[2] Motor Derecho adelante (PWM 150)"));
+  Serial.println(F("[3] Ambos Motores adelante (PWM 150)"));
+  Serial.println(F("[s] Parar todos los motores"));
+  Serial.println(F("[4] Monitoreo continuo Sensores y Pulsador"));
+  Serial.println(F("[m] Mostrar este menu"));
+  Serial.println(F("=========================================="));
+  Serial.print(F("Seleccione opcion: "));
+}
+
+void setupDebug() {
+  Serial.begin(115200);
+  printDebugMenu();
+}
+
+void loopDebug() {
+  if (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\r' || c == '\n') {
+      return;
+    }
+
+    if (telemetryActive) {
+      telemetryActive = false;
+      Serial.println(F("\n[INFO] Monitoreo detenido."));
+      printDebugMenu();
+      return;
+    }
+
+    switch (c) {
+      case '1':
+        setMotor(IN1, IN2, ENA, true, DEBUG_MOTOR_PWM);
+        setMotor(IN3, IN4, ENB, true, 0);
+        Serial.println(F("\n[MOTOR] Izquierdo: ON (PWM 150) | Derecho: OFF. Presione 's' para parar."));
+        break;
+
+      case '2':
+        setMotor(IN1, IN2, ENA, true, 0);
+        setMotor(IN3, IN4, ENB, true, DEBUG_MOTOR_PWM);
+        Serial.println(F("\n[MOTOR] Izquierdo: OFF | Derecho: ON (PWM 150). Presione 's' para parar."));
+        break;
+
+      case '3':
+        setMotor(IN1, IN2, ENA, true, DEBUG_MOTOR_PWM);
+        setMotor(IN3, IN4, ENB, true, DEBUG_MOTOR_PWM);
+        Serial.println(F("\n[MOTOR] Ambos Motores: ON (PWM 150). Presione 's' para parar."));
+        break;
+
+      case 's':
+      case 'S':
+        setMotor(IN1, IN2, ENA, true, 0);
+        setMotor(IN3, IN4, ENB, true, 0);
+        Serial.println(F("\n[MOTOR] Motores DETENIDOS."));
+        break;
+
+      case '4':
+        telemetryActive = true;
+        lastTelemetryMs = 0;
+        Serial.println(F("\n[TELEMETRIA] Iniciando lectura cada 200 ms (presione cualquier tecla para salir):"));
+        break;
+
+      case 'm':
+      case 'M':
+      case 'h':
+      case 'H':
+        printDebugMenu();
+        break;
+
+      default:
+        Serial.print(F("\n[AVISO] Comando no reconocido: '"));
+        Serial.print(c);
+        Serial.println(F("'. Presione 'm' para ver el menu."));
+        break;
+    }
+  }
+
+  if (telemetryActive) {
+    unsigned long now = millis();
+    if (now - lastTelemetryMs >= 200) {
+      lastTelemetryMs = now;
+
+      bool pulsadorPresionado = (digitalRead(PIN_PULSADOR_LARGADA) == LOW);
+      int rawIzq = digitalRead(SENSOR_IZQ);
+      int rawDer = digitalRead(SENSOR_DER);
+      SensorInputs norm = LineFollowerController::normalizeSensors(rawIzq, rawDer, POLARIDAD_PISTA);
+
+      Serial.print(F("[SENSORES] Izq: "));
+      Serial.print(rawIzq);
+      Serial.print(norm.leftDetected ? F(" (LINEA)") : F(" (FONDO)"));
+      Serial.print(F(" | Der: "));
+      Serial.print(rawDer);
+      Serial.print(norm.rightDetected ? F(" (LINEA)") : F(" (FONDO)"));
+      Serial.print(F(" | Pulsador: "));
+      Serial.println(pulsadorPresionado ? F("PRESIONADO") : F("LIBRE"));
+    }
+  }
+}
+#endif
+
 void setup() {
   // Configuración de pines de motores
   pinMode(ENA, OUTPUT);
@@ -74,9 +182,16 @@ void setup() {
 
   // Aplicar estado inicial seguro (motores apagados, indicador apagado)
   applyOutputs(controller.getOutputs());
+
+#ifdef DEBUG_MODE
+  setupDebug();
+#endif
 }
 
 void loop() {
+#ifdef DEBUG_MODE
+  loopDebug();
+#else
   // Lectura del pulsador de largada (activo en bajo por INPUT_PULLUP)
   bool pulsadorPresionado = (digitalRead(PIN_PULSADOR_LARGADA) == LOW);
 
@@ -89,4 +204,5 @@ void loop() {
 
   // Aplicar salidas calculadas al hardware
   applyOutputs(controller.getOutputs());
+#endif
 }
