@@ -3,8 +3,8 @@
 
 // Pines de control del Motor Izquierdo (Driver B)
 const int ENA = 6;  // Pin PWM para velocidad izquierda
-const int IN1 = 9;  // Dirección izquierda
-const int IN2 = 10; // Dirección izquierda
+const int IN1 = 10; // Dirección izquierda (invertido para coincidir con el avance físico hacia adelante)
+const int IN2 = 9;  // Dirección izquierda
 
 // Pines de control del Motor Derecho (Driver A)
 const int ENB = 5;  // Pin PWM para velocidad derecha
