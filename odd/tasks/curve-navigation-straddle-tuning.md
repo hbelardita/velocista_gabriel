@@ -23,9 +23,10 @@ Adapting the software truth table to the actual chassis sensor placement and sto
 - [x] TASK-01: Update `LineFollowerController.h` constants (`BASE_SPEED = 135`, `CURVE_SPEED = 0`) and straddle truth table in `update()`.
 - [x] TASK-02: Update host unit tests in `test/test_controller_seam/test_controller.cpp` for the straddle truth table and verify TDD test suite.
 - [x] TASK-03: Run native test suite (`pio test -e native`) and build Uno firmware (`pio run -e uno`).
-- [x] TASK-04: Commit work-unit changes with Conventional Commit message and record verification evidence.
+- [x] TASK-04: Commit work-unit changes with Conventional Commit message and record verification evidence (commit `3b29de9`).
 
 ## Verification Evidence
+- Work-unit commit: `3b29de9` ("feat(navigation): adapt controller to straddle sensor topology and zero inner-wheel curve speed")
 - Native Unity tests (`pio test -e native`):
   - `test_initial_state_is_standby`: PASSED
   - `test_unpressed_button_on_boot_keeps_standby`: PASSED
