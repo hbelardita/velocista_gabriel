@@ -21,13 +21,11 @@ const int PIN_PULSADOR_LARGADA = 7;
 // Pin del indicador luminoso de carrera (Reglamento Art 2.2.7 y 4.1.2)
 const int PIN_INDICADOR = LED_BUILTIN;
 
-// Configuración de polaridad de pista
-const int VALOR_BLANCO = LOW;
-const int VALOR_NEGRO = HIGH;
-const bool LINEA_BLANCA = true; // true: línea blanca sobre fondo negro
+// Configuración unificada de polaridad de pista (WHITE_LINE o BLACK_LINE)
+const TrackPolarity POLARIDAD_PISTA = TrackPolarity::WHITE_LINE;
 
 // Instancia del controlador de dominio puro
-LineFollowerController controller;
+LineFollowerController controller(POLARIDAD_PISTA);
 
 void setMotor(int pinIn1, int pinIn2, int pinEn, bool forward, uint8_t pwm) {
   if (pwm == 0) {
@@ -82,15 +80,12 @@ void loop() {
   // Lectura del pulsador de largada (activo en bajo por INPUT_PULLUP)
   bool pulsadorPresionado = (digitalRead(PIN_PULSADOR_LARGADA) == LOW);
 
-  // Lectura y normalización de sensores según polaridad de pista
+  // Lectura física de sensores ópticos TCRT5000
   int rawIzq = digitalRead(SENSOR_IZQ);
   int rawDer = digitalRead(SENSOR_DER);
-  SensorInputs sensors;
-  sensors.leftDetected = (rawIzq == (LINEA_BLANCA ? VALOR_BLANCO : VALOR_NEGRO));
-  sensors.rightDetected = (rawDer == (LINEA_BLANCA ? VALOR_BLANCO : VALOR_NEGRO));
 
-  // Actualización del controlador de dominio puro
-  controller.update(pulsadorPresionado, sensors, millis());
+  // Actualización del controlador de dominio puro con normalización unificada
+  controller.updateRaw(pulsadorPresionado, rawIzq, rawDer, millis());
 
   // Aplicar salidas calculadas al hardware
   applyOutputs(controller.getOutputs());

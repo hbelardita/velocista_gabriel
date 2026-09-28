@@ -4,10 +4,10 @@
 
 **Blocked by:** 02: Compliant Start Routine and Race Indicator
 
-**Status:** ready-for-agent
+**Status:** closed
 
-- [ ] Unified track polarity parameter configured to handle white-line or black-line surfaces without logic duplication.
-- [ ] Straight cruising logic applies `BASE_SPEED` with right motor trim compensation when both sensors track the line.
-- [ ] Differential turn reduces inner-wheel speed forward (to ~35-40% PWM) while sustaining outer-wheel speed forward.
-- [ ] Counter-rotation / motor reversal is strictly excluded from active cruising states.
-- [ ] Unit tests verify motor output commands for centered, left drift, and right drift across both track polarities.
+- [x] Unified track polarity parameter configured to handle white-line or black-line surfaces without logic duplication.
+- [x] Straight cruising logic applies `BASE_SPEED` with right motor trim compensation when both sensors track the line.
+- [x] Differential turn reduces inner-wheel speed forward (to ~35-40% PWM) while sustaining outer-wheel speed forward.
+- [x] Counter-rotation / motor reversal is strictly excluded from active cruising states.
+- [x] Unit tests verify motor output commands for centered, left drift, and right drift across both track polarities.
