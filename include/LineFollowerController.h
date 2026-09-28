@@ -44,6 +44,10 @@ public:
         outputs_.isStopped = true;
     }
 
+    // Actualización del ciclo de control
+    // Cumple con el Reglamento de Carreras:
+    // - Art 2.2.3 & 4.1.1: El robot permanece inmóvil en STANDBY mientras se mantiene presionado el pulsador de largada.
+    // - Art 2.2.7 & 4.1.2: Al soltarse el pulsador, pasa inmediatamente a RACING y enciende el indicador luminoso.
     void update(bool buttonPressed, const SensorInputs& sensors, uint32_t currentTimeMs) {
         (void)sensors;
         (void)currentTimeMs;
@@ -52,7 +56,7 @@ public:
             if (buttonPressed) {
                 wasButtonPressed_ = true;
             } else if (wasButtonPressed_) {
-                // Button was held and now released -> launch race routine
+                // El pulsador fue presionado y ahora es liberado -> inicio inmediato de Rutina de Carrera
                 state_ = RobotState::RACING;
                 outputs_.indicatorActive = true;
                 outputs_.isStopped = false;

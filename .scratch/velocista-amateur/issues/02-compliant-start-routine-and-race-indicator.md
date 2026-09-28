@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Test Harness and Controller Seam
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Controller maintains `STANDBY` state with motors stopped (`PWM = 0`) while start button is held.
-- [ ] Controller transitions immediately to `RACING` state and energizes race indicator LED when start button is released.
-- [ ] Hardcoded `delay(2000)` completely removed from startup sequence.
-- [ ] Unit tests verify state transitions from `STANDBY` to `RACING` based on button events.
-- [ ] Hardware wiring and pullup configuration verified on Arduino Pin 7 and Pin 13 (`LED_BUILTIN`).
+- [x] Controller maintains `STANDBY` state with motors stopped (`PWM = 0`) while start button is held.
+- [x] Controller transitions immediately to `RACING` state and energizes race indicator LED when start button is released.
+- [x] Hardcoded `delay(2000)` completely removed from startup sequence.
+- [x] Unit tests verify state transitions from `STANDBY` to `RACING` based on button events.
+- [x] Hardware wiring and pullup configuration verified on Arduino Pin 7 and Pin 13 (`LED_BUILTIN`).
