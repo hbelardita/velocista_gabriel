@@ -37,7 +37,8 @@ class LineFollowerController {
 public:
     static const uint8_t BASE_SPEED = 135;
     static const uint8_t TRIM_RIGHT = 20;
-    static const uint8_t CURVE_SPEED = 0; // Pivote sobre rueda interna detenida (giro cerrado para curva R30)
+    static const uint8_t TURN_REVERSE_PWM = 90; // Contramarcha en rueda interna para giro cerrado sobre su eje
+    static const uint8_t CURVE_SPEED = 0;
 
     explicit LineFollowerController(TrackPolarity polarity = TrackPolarity::WHITE_LINE)
         : state_(RobotState::STANDBY),
@@ -69,15 +70,14 @@ public:
     }
 
     // Actualización del ciclo de control
-    // Cumple con el Reglamento de Carreras y ADRs 0001, 0002, 0003:
+    // Cumple con el Reglamento de Carreras:
     // - Art 2.2.3 & 4.1.1: El robot permanece inmóvil en STANDBY mientras se mantiene presionado el pulsador de largada.
     // - Art 2.2.7 & 4.1.2: Al soltarse el pulsador, pasa inmediatamente a RACING y enciende el indicador luminoso.
     // - Topología a horcajadas (línea en el medio):
-    //   * !left && !right: centrado en recta (ambos en fondo) -> velocidad crucero BASE_SPEED con trim.
-    //   * !left && right: sensor derecho toca línea -> giro cerrado a la derecha (rueda interna a 0).
-    //   * left && !right: sensor izquierdo toca línea -> giro cerrado a la izquierda (rueda interna a 0).
+    //   * !left && !right: centrado en recta -> avance recto a BASE_SPEED con trim.
+    //   * !left && right: sensor derecho toca línea -> giro cerrado a la derecha con rueda derecha en reversa (PWM 90).
+    //   * left && !right: sensor izquierdo toca línea -> giro cerrado a la izquierda con rueda izquierda en reversa (PWM 90).
     //   * left && right: cruce transversal -> avance recto continuo.
-    // - Tracción diferencial hacia adelante sin contramarcha (ADR 0002).
     void update(bool buttonPressed, const SensorInputs& sensors, uint32_t currentTimeMs) {
         (void)currentTimeMs;
 
@@ -95,23 +95,29 @@ public:
         if (state_ == RobotState::RACING) {
             outputs_.indicatorActive = true;
             outputs_.isStopped = false;
-            outputs_.motors.leftForward = true;
-            outputs_.motors.rightForward = true;
 
             if (!sensors.leftDetected && !sensors.rightDetected) {
                 // Centrado: ambos sensores en fondo (línea en el medio) -> avance recto
+                outputs_.motors.leftForward = true;
+                outputs_.motors.rightForward = true;
                 outputs_.motors.leftPwm = BASE_SPEED;
                 outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
             } else if (!sensors.leftDetected && sensors.rightDetected) {
-                // Curva a la derecha / desvío a la izquierda: rueda interna (derecha) detenida a CURVE_SPEED (0)
+                // Curva a la derecha / desvío a la izquierda: rueda interna (derecha) en reversa para giro cerrado
+                outputs_.motors.leftForward = true;
+                outputs_.motors.rightForward = false;
                 outputs_.motors.leftPwm = BASE_SPEED;
-                outputs_.motors.rightPwm = CURVE_SPEED;
+                outputs_.motors.rightPwm = TURN_REVERSE_PWM;
             } else if (sensors.leftDetected && !sensors.rightDetected) {
-                // Curva a la izquierda / desvío a la derecha: rueda interna (izquierda) detenida a CURVE_SPEED (0)
-                outputs_.motors.leftPwm = CURVE_SPEED;
+                // Curva a la izquierda / desvío a la derecha: rueda interna (izquierda) en reversa para giro cerrado
+                outputs_.motors.leftForward = false;
+                outputs_.motors.rightForward = true;
+                outputs_.motors.leftPwm = TURN_REVERSE_PWM;
                 outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
             } else {
                 // Cruce transversal / marca de largada (ambos sensores detectan línea) -> avance recto continuo
+                outputs_.motors.leftForward = true;
+                outputs_.motors.rightForward = true;
                 outputs_.motors.leftPwm = BASE_SPEED;
                 outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
             }

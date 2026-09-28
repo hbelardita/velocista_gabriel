@@ -128,33 +128,31 @@ void test_left_drift_steers_right_smoothly_forward(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    // Curva a la derecha / desvío a la izquierda: sensor derecho toca la línea blanca
+    // Curva a la derecha / desvío a la izquierda: sensor derecho toca la línea blanca -> rueda derecha en reversa
     SensorInputs curveRight = {false, true};
     controller.update(false, curveRight, 300);
 
     ControllerOutputs outputs = controller.getOutputs();
     TEST_ASSERT_FALSE(outputs.isStopped);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outputs.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outputs.motors.rightPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, outputs.motors.rightPwm); // Rueda interna detenida
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outputs.motors.rightPwm);
     TEST_ASSERT_TRUE(outputs.motors.leftForward);
-    TEST_ASSERT_TRUE(outputs.motors.rightForward);
+    TEST_ASSERT_FALSE(outputs.motors.rightForward); // Contramarcha en rueda interna derecha
 }
 
 void test_right_drift_steers_left_smoothly_forward(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    // Curva a la izquierda / desvío a la derecha: sensor izquierdo toca la línea blanca
+    // Curva a la izquierda / desvío a la derecha: sensor izquierdo toca la línea blanca -> rueda izquierda en reversa
     SensorInputs curveLeft = {true, false};
     controller.update(false, curveLeft, 300);
 
     ControllerOutputs outputs = controller.getOutputs();
     TEST_ASSERT_FALSE(outputs.isStopped);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outputs.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, outputs.motors.leftPwm); // Rueda interna detenida
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outputs.motors.leftPwm);
+    TEST_ASSERT_FALSE(outputs.motors.leftForward); // Contramarcha en rueda interna izquierda
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outputs.motors.rightPwm);
-    TEST_ASSERT_TRUE(outputs.motors.leftForward);
     TEST_ASSERT_TRUE(outputs.motors.rightForward);
 }
 
@@ -178,19 +176,18 @@ void test_counter_rotation_strictly_excluded_in_active_cruising(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    SensorInputs scenarios[] = {
+    // En avance recto y marcas transversales ambas ruedas deben avanzar siempre hacia adelante
+    SensorInputs forwardScenarios[] = {
         {false, false}, // Centered (line in middle)
-        {false, true},  // Right sensor on line (curve right)
-        {true, false},  // Left sensor on line (curve left)
         {true, true}    // Transverse mark
     };
 
-    for (size_t i = 0; i < sizeof(scenarios)/sizeof(scenarios[0]); ++i) {
-        controller.update(false, scenarios[i], 300 + (uint32_t)i * 100);
+    for (size_t i = 0; i < sizeof(forwardScenarios)/sizeof(forwardScenarios[0]); ++i) {
+        controller.update(false, forwardScenarios[i], 300 + (uint32_t)i * 100);
         ControllerOutputs outputs = controller.getOutputs();
         TEST_ASSERT_FALSE(outputs.isStopped);
-        TEST_ASSERT_TRUE_MESSAGE(outputs.motors.leftForward, "Left motor counter-rotation detected!");
-        TEST_ASSERT_TRUE_MESSAGE(outputs.motors.rightForward, "Right motor counter-rotation detected!");
+        TEST_ASSERT_TRUE_MESSAGE(outputs.motors.leftForward, "Left motor counter-rotation detected in straight cruise!");
+        TEST_ASSERT_TRUE_MESSAGE(outputs.motors.rightForward, "Right motor counter-rotation detected in straight cruise!");
     }
 }
 
@@ -245,21 +242,25 @@ void test_navigation_commands_across_both_track_polarities(void) {
     whiteController.updateRaw(false, 1, 0, 350);
     out = whiteController.getOutputs();
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, out.motors.rightPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_FALSE(out.motors.rightForward);
 
     // Curve left: left sensor touches white line (left reads 0 / LOW, right reads 1 / HIGH) -> steer left
     whiteController.updateRaw(false, 0, 1, 400);
     out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, out.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.leftPwm);
+    TEST_ASSERT_FALSE(out.motors.leftForward);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
 
     // Transverse line (both sensors read 0 / LOW) -> continues straight ahead
     whiteController.updateRaw(false, 0, 0, 450);
     out = whiteController.getOutputs();
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
 
     // 2. Controller configured for BLACK_LINE (1 = black line, 0 = light background)
     LineFollowerController blackController(TrackPolarity::BLACK_LINE);
@@ -270,26 +271,32 @@ void test_navigation_commands_across_both_track_polarities(void) {
     out = blackController.getOutputs();
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
 
     // Curve right: right sensor touches black line (left reads 0 / LOW, right reads 1 / HIGH) -> steer right
     blackController.updateRaw(false, 0, 1, 350);
     out = blackController.getOutputs();
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, out.motors.rightPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_FALSE(out.motors.rightForward);
 
     // Curve left: left sensor touches black line (left reads 1 / HIGH, right reads 0 / LOW) -> steer left
     blackController.updateRaw(false, 1, 0, 400);
     out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(0, out.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.leftPwm);
+    TEST_ASSERT_FALSE(out.motors.leftForward);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
 
     // Transverse line (both sensors read 1 / HIGH) -> continues straight ahead
     blackController.updateRaw(false, 1, 1, 450);
     out = blackController.getOutputs();
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
 }
 
 int main(int argc, char **argv) {
