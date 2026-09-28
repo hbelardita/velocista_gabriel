@@ -43,16 +43,22 @@ public:
 
     static const uint8_t BASE_SPEED = 115;
     static const uint8_t TRIM_RIGHT = 20;
-    static const uint8_t TURN_REVERSE_PWM = 80; // Contramarcha en rueda interna para giro cerrado sobre su eje
-    static const uint8_t CURVE_SPEED = 40;
-    static const uint32_t REVERSE_ENGAGEMENT_DELAY_MS = 120;
+    static const uint8_t TURN_REVERSE_PWM = 90; // Contramarcha en rueda interna para giro cerrado sobre su eje
+    static const uint8_t CURVE_SPEED = 0;
+    static const uint32_t REVERSE_ENGAGEMENT_DELAY_MS = 70;
+    static const uint8_t MAX_STRAIGHT_SPEED = 180;
+    static const uint32_t STRAIGHT_ACCEL_DELAY_MS = 150;
+    static const uint32_t ACCEL_STEP_INTERVAL_MS = 50;
+    static const uint8_t ACCEL_STEP_PWM = 5;
 
     explicit LineFollowerController(TrackPolarity polarity = TrackPolarity::WHITE_LINE)
         : state_(RobotState::STANDBY),
           wasButtonPressed_(false),
           polarity_(polarity),
           activeTurn_(ActiveTurn::NONE),
-          turnStartTimeMs_(0) {
+          turnStartTimeMs_(0),
+          inStraightCruise_(false),
+          straightStartTimeMs_(0) {
         outputs_.motors.leftPwm = 0;
         outputs_.motors.rightPwm = 0;
         outputs_.motors.leftForward = true;
@@ -94,6 +100,8 @@ public:
     //     - Etapa 2 (>= 70 ms persistente): contramarcha en reversa (rueda interna PWM TURN_REVERSE_PWM = 90).
     void update(bool buttonPressed, const SensorInputs& sensors, uint32_t currentTimeMs) {
         if (state_ == RobotState::STANDBY) {
+            inStraightCruise_ = false;
+            straightStartTimeMs_ = 0;
             if (buttonPressed) {
                 wasButtonPressed_ = true;
             } else if (wasButtonPressed_) {
@@ -101,6 +109,8 @@ public:
                 state_ = RobotState::RACING;
                 activeTurn_ = ActiveTurn::NONE;
                 turnStartTimeMs_ = 0;
+                inStraightCruise_ = false;
+                straightStartTimeMs_ = 0;
                 outputs_.indicatorActive = true;
                 outputs_.isStopped = false;
             }
@@ -111,14 +121,31 @@ public:
             outputs_.isStopped = false;
 
             if (!sensors.leftDetected && !sensors.rightDetected) {
-                // Centrado: ambos sensores en fondo (línea en el medio) -> avance recto
+                // Centrado: ambos sensores en fondo (línea en el medio) -> aceleración progresiva en recta
                 activeTurn_ = ActiveTurn::NONE;
+                if (!inStraightCruise_) {
+                    inStraightCruise_ = true;
+                    straightStartTimeMs_ = currentTimeMs;
+                }
+                uint32_t straightElapsed = currentTimeMs - straightStartTimeMs_;
+                uint8_t currentSpeed = BASE_SPEED;
+                if (straightElapsed > STRAIGHT_ACCEL_DELAY_MS) {
+                    uint32_t accelTime = straightElapsed - STRAIGHT_ACCEL_DELAY_MS;
+                    uint32_t speedBoost = (accelTime / ACCEL_STEP_INTERVAL_MS) * ACCEL_STEP_PWM;
+                    if (speedBoost > (uint32_t)(MAX_STRAIGHT_SPEED - BASE_SPEED)) {
+                        currentSpeed = MAX_STRAIGHT_SPEED;
+                    } else {
+                        currentSpeed = (uint8_t)(BASE_SPEED + speedBoost);
+                    }
+                }
                 outputs_.motors.leftForward = true;
                 outputs_.motors.rightForward = true;
-                outputs_.motors.leftPwm = BASE_SPEED;
-                outputs_.motors.rightPwm = BASE_SPEED - TRIM_RIGHT;
+                outputs_.motors.leftPwm = currentSpeed;
+                outputs_.motors.rightPwm = currentSpeed - TRIM_RIGHT;
             } else if (!sensors.leftDetected && sensors.rightDetected) {
                 // Curva a la derecha / desvío a la izquierda
+                inStraightCruise_ = false;
+                straightStartTimeMs_ = 0;
                 if (activeTurn_ != ActiveTurn::RIGHT) {
                     activeTurn_ = ActiveTurn::RIGHT;
                     turnStartTimeMs_ = currentTimeMs;
@@ -139,6 +166,8 @@ public:
                 }
             } else if (sensors.leftDetected && !sensors.rightDetected) {
                 // Curva a la izquierda / desvío a la derecha
+                inStraightCruise_ = false;
+                straightStartTimeMs_ = 0;
                 if (activeTurn_ != ActiveTurn::LEFT) {
                     activeTurn_ = ActiveTurn::LEFT;
                     turnStartTimeMs_ = currentTimeMs;
@@ -160,6 +189,8 @@ public:
             } else {
                 // Cruce transversal / marca de largada (ambos sensores detectan línea) -> avance recto continuo
                 activeTurn_ = ActiveTurn::NONE;
+                inStraightCruise_ = false;
+                straightStartTimeMs_ = 0;
                 outputs_.motors.leftForward = true;
                 outputs_.motors.rightForward = true;
                 outputs_.motors.leftPwm = BASE_SPEED;
@@ -187,6 +218,8 @@ private:
     ControllerOutputs outputs_;
     ActiveTurn activeTurn_;
     uint32_t turnStartTimeMs_;
+    bool inStraightCruise_;
+    uint32_t straightStartTimeMs_;
 };
 
 #endif // LINE_FOLLOWER_CONTROLLER_H

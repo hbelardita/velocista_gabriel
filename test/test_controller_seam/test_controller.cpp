@@ -398,6 +398,83 @@ void test_turn_timer_resets_when_re_centering(void) {
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
 }
 
+void test_straightaway_progressive_acceleration(void) {
+    LineFollowerController controller;
+    SensorInputs centered = {false, false};
+
+    // Driver holds button on starting grid
+    controller.update(true, centered, 200);
+    // Referee gives start signal -> button released at t = 300 ms (starts racing)
+    controller.update(false, centered, 300);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+
+    // At t = 400 ms (elapsed 100 ms <= 150 ms): initial cruise window, leftPwm = BASE_SPEED (135), rightPwm = 115
+    controller.update(false, centered, 400);
+    ControllerOutputs out400 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out400.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out400.motors.rightPwm);
+    TEST_ASSERT_TRUE(out400.motors.leftForward);
+    TEST_ASSERT_TRUE(out400.motors.rightForward);
+
+    // At t = 500 ms (elapsed 200 ms -> 50 ms in acceleration): leftPwm = 140, rightPwm = 120
+    controller.update(false, centered, 500);
+    ControllerOutputs out500 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(140, out500.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(120, out500.motors.rightPwm);
+    TEST_ASSERT_TRUE(out500.motors.leftForward);
+    TEST_ASSERT_TRUE(out500.motors.rightForward);
+
+    // At t = 600 ms (elapsed 300 ms -> 150 ms in acceleration): leftPwm = 150, rightPwm = 130
+    controller.update(false, centered, 600);
+    ControllerOutputs out600 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(150, out600.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(130, out600.motors.rightPwm);
+    TEST_ASSERT_TRUE(out600.motors.leftForward);
+    TEST_ASSERT_TRUE(out600.motors.rightForward);
+
+    // At t = 1000 ms (elapsed 700 ms): leftPwm capped at MAX_STRAIGHT_SPEED (180), rightPwm = 160
+    controller.update(false, centered, 1000);
+    ControllerOutputs out1000 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, out1000.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED - LineFollowerController::TRIM_RIGHT, out1000.motors.rightPwm);
+    TEST_ASSERT_TRUE(out1000.motors.leftForward);
+    TEST_ASSERT_TRUE(out1000.motors.rightForward);
+}
+
+void test_curve_entry_instantly_cancels_straightaway_speed_boost(void) {
+    LineFollowerController controller;
+    SensorInputs centered = {false, false};
+
+    // Driver holds button and releases at t = 300 ms to start racing
+    controller.update(true, centered, 200);
+    controller.update(false, centered, 300);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+
+    // Accelerate on straightaway up to 180 (at t = 1000 ms)
+    controller.update(false, centered, 1000);
+    ControllerOutputs outCruise = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, outCruise.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED - LineFollowerController::TRIM_RIGHT, outCruise.motors.rightPwm);
+
+    // At t = 1010 ms, enter curve right ({false, true})
+    SensorInputs curveRight = {false, true};
+    controller.update(false, curveRight, 1010);
+    ControllerOutputs outCurveStage1 = controller.getOutputs();
+    // Verify left motor immediately drops to BASE_SPEED (135) - NOT 180! And right motor applies Stage 1 (0)
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outCurveStage1.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outCurveStage1.motors.rightPwm);
+    TEST_ASSERT_TRUE(outCurveStage1.motors.leftForward);
+    TEST_ASSERT_TRUE(outCurveStage1.motors.rightForward);
+
+    // At t = 1090 ms (80 ms into curve >= 70 ms), right motor engages Stage 2 reverse (90), left motor remains BASE_SPEED (135)
+    controller.update(false, curveRight, 1090);
+    ControllerOutputs outCurveStage2 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outCurveStage2.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outCurveStage2.motors.rightPwm);
+    TEST_ASSERT_TRUE(outCurveStage2.motors.leftForward);
+    TEST_ASSERT_FALSE(outCurveStage2.motors.rightForward);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_initial_state_is_standby);
@@ -414,5 +491,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_unified_track_polarity_normalization);
     RUN_TEST(test_navigation_commands_across_both_track_polarities);
     RUN_TEST(test_turn_timer_resets_when_re_centering);
+    RUN_TEST(test_straightaway_progressive_acceleration);
+    RUN_TEST(test_curve_entry_instantly_cancels_straightaway_speed_boost);
     return UNITY_END();
 }
