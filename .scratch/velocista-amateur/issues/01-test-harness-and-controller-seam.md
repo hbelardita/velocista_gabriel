@@ -4,9 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] PlatformIO configured with a native environment to execute unit tests on the host machine.
-- [ ] Pure C++ domain seam (`LineFollowerController`) created with no direct Arduino hardware dependencies.
-- [ ] Hardware adapter in `main.cpp` refactored to pass sensor inputs to the controller and apply motor outputs.
-- [ ] Initial automated test suite passes on host execution (`pio test -e native`).
+- [x] PlatformIO configured with a native environment to execute unit tests on the host machine.
+- [x] Pure C++ domain seam (`LineFollowerController`) created with no direct Arduino hardware dependencies.
+- [x] Hardware adapter in `main.cpp` refactored to pass sensor inputs to the controller and apply motor outputs.
+- [x] Initial automated test suite passes on host execution (`pio test -e native`).
+
