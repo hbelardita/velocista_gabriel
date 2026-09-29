@@ -1,15 +1,15 @@
 #include <Arduino.h>
 #include "LineFollowerController.h"
 
-// Pines de control del Motor Izquierdo (Driver A físicamente conectado al motor izquierdo)
-const int ENA = 5;  // Pin PWM para velocidad izquierda
-const int IN1 = 4;  // Dirección izquierda
-const int IN2 = 8;  // Dirección izquierda
+// Pines de control del Motor Izquierdo (físicamente conectado a Driver B)
+const int ENA = 6;  // Pin PWM para velocidad izquierda
+const int IN1 = 10; // Dirección izquierda
+const int IN2 = 9;  // Dirección izquierda
 
-// Pines de control del Motor Derecho (Driver B físicamente conectado al motor derecho)
-const int ENB = 6;  // Pin PWM para velocidad derecha
-const int IN3 = 10; // Dirección derecha
-const int IN4 = 9;  // Dirección derecha
+// Pines de control del Motor Derecho (físicamente conectado a Driver A)
+const int ENB = 5;  // Pin PWM para velocidad derecha
+const int IN3 = 4;  // Dirección derecha
+const int IN4 = 8;  // Dirección derecha
 
 // Pines de los sensores TCRT5000 (Arreglo discreto de 4 sensores)
 const int SENSOR_1_EXT_IZQ = A0;
