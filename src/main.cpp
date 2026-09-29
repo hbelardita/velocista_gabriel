@@ -17,6 +17,19 @@ const int SENSOR_2_INT_IZQ = A1;
 const int SENSOR_3_INT_DER = A2;
 const int SENSOR_4_EXT_DER = A3;
 
+// Configuración de lectura para S4 (soporte para lectura analógica directa con umbral)
+const bool S4_USE_ANALOG = true;
+const int S4_ANALOG_THRESHOLD = 500; // Calibrable: < 500 = detección reflectiva / línea blanca
+
+inline int readSensorS4() {
+  if (S4_USE_ANALOG) {
+    int ana = analogRead(SENSOR_4_EXT_DER);
+    // En TCRT5000, sobre línea blanca refleja más y el valor ADC baja (< umbral = LOW / activo)
+    return (ana < S4_ANALOG_THRESHOLD) ? LOW : HIGH;
+  }
+  return digitalRead(SENSOR_4_EXT_DER);
+}
+
 // Pin del pulsador de largada (término canónico según CONTEXT.md)
 const int PIN_PULSADOR_LARGADA = 7;
 
@@ -58,6 +71,7 @@ void applyOutputs(const ControllerOutputs& outputs) {
 #ifdef DEBUG_MODE
 const uint8_t DEBUG_MOTOR_PWM = 150;
 bool telemetryActive = false;
+bool adcDiagnosticActive = false;
 unsigned long lastTelemetryMs = 0;
 
 void printDebugMenu() {
@@ -70,6 +84,7 @@ void printDebugMenu() {
   Serial.println(F("[s] Parar todos los motores"));
   Serial.println(F("[4] Monitoreo continuo 4 Sensores y Pulsador"));
   Serial.println(F("[5] Test recta con trim (simula centrado [0,1,1,0])"));
+  Serial.println(F("[6] Diagnostico ADC (A0..A3) en tiempo real para calibracion"));
   Serial.println(F("[m] Mostrar este menu"));
   Serial.println(F("=========================================="));
   Serial.print(F("Seleccione opcion: "));
@@ -87,8 +102,9 @@ void loopDebug() {
       return;
     }
 
-    if (telemetryActive) {
+    if (telemetryActive || adcDiagnosticActive) {
       telemetryActive = false;
+      adcDiagnosticActive = false;
       Serial.println(F("\n[INFO] Monitoreo detenido."));
       printDebugMenu();
       return;
@@ -151,6 +167,12 @@ void loopDebug() {
         }
         break;
 
+      case '6':
+        adcDiagnosticActive = true;
+        lastTelemetryMs = 0;
+        Serial.println(F("\n[ADC DIAGNOSTICO] Lectura ADC bruta 0..1023 cada 150 ms (cualquier tecla para salir):"));
+        break;
+
       case 'm':
       case 'M':
       case 'h':
@@ -175,7 +197,7 @@ void loopDebug() {
       int rawS1 = digitalRead(SENSOR_1_EXT_IZQ);
       int rawS2 = digitalRead(SENSOR_2_INT_IZQ);
       int rawS3 = digitalRead(SENSOR_3_INT_DER);
-      int rawS4 = digitalRead(SENSOR_4_EXT_DER);
+      int rawS4 = readSensorS4();
       SensorInputs norm = LineFollowerController::normalizeSensors(rawS1, rawS2, rawS3, rawS4, POLARIDAD_PISTA);
 
       ControllerOutputs out = controller.getOutputs();
@@ -192,6 +214,9 @@ void loopDebug() {
       Serial.print(F(" S4:"));
       Serial.print(rawS4);
       Serial.print(norm.s4_outerRight ? F("(L)") : F("(F)"));
+      Serial.print(F("[A:"));
+      Serial.print(analogRead(SENSOR_4_EXT_DER));
+      Serial.print(F("]"));
       Serial.print(F(" | Pulsador: "));
       Serial.print(pulsadorPresionado ? F("PRESIONADO") : F("LIBRE"));
       Serial.print(F(" | Estado: "));
@@ -207,6 +232,24 @@ void loopDebug() {
       Serial.print(F("/"));
       Serial.print(out.motors.rightPwm);
       Serial.print(out.motors.rightForward ? F("F") : F("R"));
+      Serial.println();
+    }
+  }
+
+  if (adcDiagnosticActive) {
+    unsigned long now = millis();
+    if (now - lastTelemetryMs >= 150) {
+      lastTelemetryMs = now;
+      int a0 = analogRead(SENSOR_1_EXT_IZQ);
+      int a1 = analogRead(SENSOR_2_INT_IZQ);
+      int a2 = analogRead(SENSOR_3_INT_DER);
+      int a3 = analogRead(SENSOR_4_EXT_DER);
+      Serial.print(F("[ADC] S1(A0): ")); Serial.print(a0);
+      Serial.print(F("\t| S2(A1): ")); Serial.print(a1);
+      Serial.print(F("\t| S3(A2): ")); Serial.print(a2);
+      Serial.print(F("\t| S4(A3): ")); Serial.print(a3);
+      Serial.print(F(" -> S4 estado: "));
+      Serial.print(readSensorS4() == LOW ? F("LINEA (detecta)") : F("FONDO"));
       Serial.println();
     }
   }
@@ -253,7 +296,7 @@ void loop() {
   int rawS1 = digitalRead(SENSOR_1_EXT_IZQ);
   int rawS2 = digitalRead(SENSOR_2_INT_IZQ);
   int rawS3 = digitalRead(SENSOR_3_INT_DER);
-  int rawS4 = digitalRead(SENSOR_4_EXT_DER);
+  int rawS4 = readSensorS4();
 
   // Actualización del controlador de dominio puro con normalización unificada
   controller.updateRaw(pulsadorPresionado, rawS1, rawS2, rawS3, rawS4, millis());
