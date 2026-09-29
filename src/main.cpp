@@ -55,6 +55,7 @@ void applyOutputs(const ControllerOutputs& outputs) {
 
 #ifdef DEBUG_MODE
 const uint8_t DEBUG_MOTOR_PWM = 150;
+const uint8_t BASE_SPEED = 115;  // Debe coincidir con LineFollowerController::BASE_SPEED
 bool telemetryActive = false;
 unsigned long lastTelemetryMs = 0;
 
@@ -67,6 +68,7 @@ void printDebugMenu() {
   Serial.println(F("[3] Ambos Motores adelante (PWM 150)"));
   Serial.println(F("[s] Parar todos los motores"));
   Serial.println(F("[4] Monitoreo continuo Sensores y Pulsador"));
+  Serial.println(F("[5] Test recta con trim (simula centrado)"));
   Serial.println(F("[m] Mostrar este menu"));
   Serial.println(F("=========================================="));
   Serial.print(F("Seleccione opcion: "));
@@ -123,6 +125,25 @@ void loopDebug() {
         Serial.println(F("\n[TELEMETRIA] Iniciando lectura cada 200 ms (presione cualquier tecla para salir):"));
         break;
 
+      case '5':
+        // Simular estado RACING con sensores centrados para ver PWM con trim
+        controller.updateRaw(false, 1, 1, millis());  // WHITE_LINE: 1 = fondo
+        {
+          ControllerOutputs out = controller.getOutputs();
+          Serial.print(F("\n[TRIM TEST] Estado: "));
+          Serial.print(out.isStopped ? F("STOP") : F("RACING"));
+          Serial.print(F(" | PWM Izq: "));
+          Serial.print(out.motors.leftPwm);
+          Serial.print(out.motors.leftForward ? F(" FWD") : F(" REV"));
+          Serial.print(F(" | PWM Der: "));
+          Serial.print(out.motors.rightPwm);
+          Serial.print(out.motors.rightForward ? F(" FWD") : F(" REV"));
+          Serial.print(F(" | Trim aplicado: "));
+          Serial.print(BASE_SPEED - out.motors.rightPwm);
+          Serial.println();
+        }
+        break;
+
       case 'm':
       case 'M':
       case 'h':
@@ -148,6 +169,9 @@ void loopDebug() {
       int rawDer = digitalRead(SENSOR_DER);
       SensorInputs norm = LineFollowerController::normalizeSensors(rawIzq, rawDer, POLARIDAD_PISTA);
 
+      // Mostrar también salidas del controlador
+      ControllerOutputs out = controller.getOutputs();
+
       Serial.print(F("[SENSORES] Izq: "));
       Serial.print(rawIzq);
       Serial.print(norm.leftDetected ? F(" (LINEA)") : F(" (FONDO)"));
@@ -155,7 +179,14 @@ void loopDebug() {
       Serial.print(rawDer);
       Serial.print(norm.rightDetected ? F(" (LINEA)") : F(" (FONDO)"));
       Serial.print(F(" | Pulsador: "));
-      Serial.println(pulsadorPresionado ? F("PRESIONADO") : F("LIBRE"));
+      Serial.print(pulsadorPresionado ? F("PRESIONADO") : F("LIBRE"));
+      Serial.print(F(" | PWM Izq: "));
+      Serial.print(out.motors.leftPwm);
+      Serial.print(out.motors.leftForward ? F(" FWD") : F(" REV"));
+      Serial.print(F(" | PWM Der: "));
+      Serial.print(out.motors.rightPwm);
+      Serial.print(out.motors.rightForward ? F(" FWD") : F(" REV"));
+      Serial.println();
     }
   }
 }

@@ -41,11 +41,11 @@ public:
         RIGHT
     };
 
-    static const uint8_t BASE_SPEED = 135;
+    static const uint8_t BASE_SPEED = 115;
     static const uint8_t TRIM_RIGHT = 20;
-    static const uint8_t TURN_REVERSE_PWM = 90; // Contramarcha en rueda interna para giro cerrado sobre su eje
-    static const uint8_t CURVE_SPEED = 0;
-    static const uint32_t REVERSE_ENGAGEMENT_DELAY_MS = 70;
+    static const uint8_t TURN_REVERSE_PWM = 80; // Contramarcha en rueda interna para giro cerrado sobre su eje
+    static const uint8_t CURVE_SPEED = 40;
+    static const uint32_t REVERSE_ENGAGEMENT_DELAY_MS = 120;
 
     explicit LineFollowerController(TrackPolarity polarity = TrackPolarity::WHITE_LINE)
         : state_(RobotState::STANDBY),
