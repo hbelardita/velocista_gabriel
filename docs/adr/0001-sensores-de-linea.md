@@ -11,9 +11,9 @@ Decidimos implementar la arquitectura de 4 sensores digitales TCRT5000 discretos
 - **Línea de trayectoria:** 20 mm de ancho (se extiende de x = -10 mm a x = +10 mm cuando el robot está centrado).
 - **Posiciones relativas (origen en centro del chasis x = 0):**
   - **S1 (Ext Izq):** x = -25 mm (Pin A0)
-  - **S2 (Int Izq):** x = -6 mm (Pin 2)
-  - **S3 (Int Der):** x = +6 mm (Pin 3)
-  - **S4 (Ext Der):** x = +25 mm (Pin A1)
+  - **S2 (Int Izq):** x = -6 mm (Pin A1)
+  - **S3 (Int Der):** x = +6 mm (Pin A2)
+  - **S4 (Ext Der):** x = +25 mm (Pin A3)
 - **Separación entre centros (pitch):**
   - Sensores internos (S2 - S3): 12 mm (ambos montados dentro de la línea de 20 mm cuando el robot viaja centrado).
   - Sensores interno y externo (S1 - S2 y S3 - S4): 19 mm (los sensores externos S1 y S4 viajan fuera de la línea en recta).
@@ -28,7 +28,7 @@ Decidimos implementar la arquitectura de 4 sensores digitales TCRT5000 discretos
 |<--------------------------- Chasis (115 mm) --------------------------->|
 |-- 27.5 mm --|                 50 mm span                 |-- 27.5 mm --|
               [S1: Ext Izq]     [S2: Int Izq]   [S3: Int Der]     [S4: Ext Der]
-                 (Pin A0)          (Pin 2)         (Pin 3)          (Pin A1)
+                 (Pin A0)          (Pin A1)        (Pin A2)         (Pin A3)
                     |                 |               |                 |
                     |<---- 19 mm ---->|<--- 12 mm --->|<---- 19 mm ---->|
                                       |===============|
@@ -40,9 +40,9 @@ Decidimos implementar la arquitectura de 4 sensores digitales TCRT5000 discretos
 | Sensor | Función | Posición x | Pin Arduino Uno | Modo |
 | :--- | :--- | :--- | :--- | :--- |
 | **S1** | Exterior Izquierdo | -25 mm | `A0` (Digital) | `INPUT` |
-| **S2** | Interior Izquierdo | -6 mm | `2` | `INPUT` |
-| **S3** | Interior Derecho | +6 mm | `3` | `INPUT` |
-| **S4** | Exterior Derecho | +25 mm | `A1` (Digital) | `INPUT` |
+| **S2** | Interior Izquierdo | -6 mm | `A1` (Digital) | `INPUT` |
+| **S3** | Interior Derecho | +6 mm | `A2` (Digital) | `INPUT` |
+| **S4** | Exterior Derecho | +25 mm | `A3` (Digital) | `INPUT` |
 
 ## Control en Dos Etapas por Discriminación Espacial
 

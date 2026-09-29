@@ -17,9 +17,9 @@ A 4-sensor layout provides physical/spatial discrimination:
 - **Sensor Footprint**: 10 mm width each.
 - **Placement**:
   - `S1` (Ext Izq): x = -25 mm, Pin A0
-  - `S2` (Int Izq): x = -6 mm, Pin 2
-  - `S3` (Int Der): x = +6 mm, Pin 3
-  - `S4` (Ext Der): x = +25 mm, Pin A1
+  - `S2` (Int Izq): x = -6 mm, Pin A1
+  - `S3` (Int Der): x = +6 mm, Pin A2
+  - `S4` (Ext Der): x = +25 mm, Pin A3
 - **Center span**: 50 mm between S1 and S4 centers (60 mm total footprint, 27.5 mm margins to chassis edges).
 - **Line**: 20 mm width (spans -10 mm to +10 mm, covering S2 and S3 when centered).
 

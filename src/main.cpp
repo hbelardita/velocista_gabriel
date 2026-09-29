@@ -13,9 +13,9 @@ const int IN4 = 8;  // Dirección derecha
 
 // Pines de los sensores TCRT5000 (Arreglo discreto de 4 sensores)
 const int SENSOR_1_EXT_IZQ = A0;
-const int SENSOR_2_INT_IZQ = 2;
-const int SENSOR_3_INT_DER = 3;
-const int SENSOR_4_EXT_DER = A1;
+const int SENSOR_2_INT_IZQ = A1;
+const int SENSOR_3_INT_DER = A2;
+const int SENSOR_4_EXT_DER = A3;
 
 // Pin del pulsador de largada (término canónico según CONTEXT.md)
 const int PIN_PULSADOR_LARGADA = 7;
