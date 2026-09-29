@@ -16,6 +16,13 @@ static void assert_standby_outputs(const LineFollowerController& controller) {
     TEST_ASSERT_FALSE(outputs.indicatorActive);
 }
 
+static void start_racing(LineFollowerController& controller) {
+    SensorInputs centered = {false, true, true, false};
+    controller.update(true, centered, 100);
+    controller.update(false, centered, 200);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+}
+
 void test_initial_state_is_standby(void) {
     LineFollowerController controller;
     assert_standby_outputs(controller);
@@ -23,9 +30,8 @@ void test_initial_state_is_standby(void) {
 
 void test_unpressed_button_on_boot_keeps_standby(void) {
     LineFollowerController controller;
-    SensorInputs sensors = {false, false};
+    SensorInputs sensors = {false, false, false, false};
 
-    // Driver has not pressed button yet
     for (uint32_t t = 0; t < 1000; t += 100) {
         controller.update(false, sensors, t);
         assert_standby_outputs(controller);
@@ -35,30 +41,29 @@ void test_unpressed_button_on_boot_keeps_standby(void) {
 void test_standby_ignores_sensor_readings_both_unpressed_and_held(void) {
     LineFollowerController controller;
 
-    // Line detected while button is unpressed
-    SensorInputs sensorsBoth = {true, true};
-    controller.update(false, sensorsBoth, 100);
+    // Line detected across all sensors while button is unpressed
+    SensorInputs sensorsAll = {true, true, true, true};
+    controller.update(false, sensorsAll, 100);
     assert_standby_outputs(controller);
 
     // Line detected while driver holds button down on starting grid
-    controller.update(true, sensorsBoth, 200);
+    controller.update(true, sensorsAll, 200);
     assert_standby_outputs(controller);
 
-    // Single sensor line detections while driver holds button down
-    SensorInputs sensorsLeft = {true, false};
-    controller.update(true, sensorsLeft, 300);
+    // Single sensor detections while driver holds button down
+    SensorInputs sensorsS1 = {true, false, false, false};
+    controller.update(true, sensorsS1, 300);
     assert_standby_outputs(controller);
 
-    SensorInputs sensorsRight = {false, true};
-    controller.update(true, sensorsRight, 400);
+    SensorInputs sensorsS4 = {false, false, false, true};
+    controller.update(true, sensorsS4, 400);
     assert_standby_outputs(controller);
 }
 
 void test_button_pressed_and_held_maintains_standby(void) {
     LineFollowerController controller;
-    SensorInputs sensors = {false, false};
+    SensorInputs sensors = {false, false, false, false};
 
-    // Driver depresses and holds button in grid
     for (uint32_t t = 100; t <= 3000; t += 500) {
         controller.update(true, sensors, t);
         assert_standby_outputs(controller);
@@ -67,14 +72,14 @@ void test_button_pressed_and_held_maintains_standby(void) {
 
 void test_button_released_transitions_immediately_to_racing_with_indicator(void) {
     LineFollowerController controller;
-    SensorInputs sensors = {true, true};
+    SensorInputs centered = {false, true, true, false};
 
     // Driver holds button on starting grid
-    controller.update(true, sensors, 1000);
+    controller.update(true, centered, 1000);
     assert_standby_outputs(controller);
 
     // Referee gives start signal -> Driver releases button
-    controller.update(false, sensors, 1050);
+    controller.update(false, centered, 1050);
     TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
 
     ControllerOutputs outputs = controller.getOutputs();
@@ -84,16 +89,14 @@ void test_button_released_transitions_immediately_to_racing_with_indicator(void)
 
 void test_racing_state_persists_after_button_release(void) {
     LineFollowerController controller;
-    SensorInputs sensors = {true, true};
+    SensorInputs centered = {false, true, true, false};
 
-    // Hold and release
-    controller.update(true, sensors, 100);
-    controller.update(false, sensors, 200);
+    controller.update(true, centered, 100);
+    controller.update(false, centered, 200);
     TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
 
-    // Subsequent cycles during race keep racing state and indicator active
     for (uint32_t t = 300; t <= 1000; t += 100) {
-        controller.update(false, sensors, t);
+        controller.update(false, centered, t);
         TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
         ControllerOutputs outputs = controller.getOutputs();
         TEST_ASSERT_TRUE(outputs.indicatorActive);
@@ -101,19 +104,12 @@ void test_racing_state_persists_after_button_release(void) {
     }
 }
 
-static void start_racing(LineFollowerController& controller) {
-    SensorInputs sensors = {false, false};
-    controller.update(true, sensors, 100);
-    controller.update(false, sensors, 200);
-    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
-}
-
-void test_straight_cruising_applies_base_speed_with_trim(void) {
+void test_centered_cruising_applies_base_speed_with_trim(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    // Topología a horcajadas: ambos sensores en fondo negro (línea blanca en el medio)
-    SensorInputs centered = {false, false};
+    // [0, 1, 1, 0]: Ambos sensores internos sobre la línea
+    SensorInputs centered = {false, true, true, false};
     controller.update(false, centered, 300);
 
     ControllerOutputs outputs = controller.getOutputs();
@@ -124,70 +120,169 @@ void test_straight_cruising_applies_base_speed_with_trim(void) {
     TEST_ASSERT_TRUE(outputs.motors.rightForward);
 }
 
-void test_left_drift_steers_right_smoothly_forward(void) {
+void test_straightaway_progressive_acceleration(void) {
     LineFollowerController controller;
-    start_racing(controller);
+    SensorInputs centered = {false, true, true, false};
 
-    // Curva a la derecha / desvío a la izquierda: sensor derecho toca la línea blanca
-    SensorInputs curveRight = {false, true};
+    controller.update(true, centered, 200);
+    controller.update(false, centered, 300);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
 
-    // Stage 1 (t = 300 ms start, check at 320 ms, elapsed 20 ms < 70 ms):
-    // frenado suave inicial (PWM 0) y ambos motores hacia adelante (anti-zigzag)
-    controller.update(false, curveRight, 300);
-    controller.update(false, curveRight, 320);
-    ControllerOutputs outStage1 = controller.getOutputs();
-    TEST_ASSERT_FALSE(outStage1.isStopped);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outStage1.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outStage1.motors.rightPwm);
-    TEST_ASSERT_TRUE(outStage1.motors.leftForward);
-    TEST_ASSERT_TRUE(outStage1.motors.rightForward);
+    // t = 350 ms (elapsed 50 ms <= STRAIGHT_ACCEL_DELAY_MS 80 ms): velocidad base
+    controller.update(false, centered, 350);
+    ControllerOutputs out350 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out350.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out350.motors.rightPwm);
+    TEST_ASSERT_TRUE(out350.motors.leftForward);
+    TEST_ASSERT_TRUE(out350.motors.rightForward);
 
-    // Stage 2 (t = 380 ms, elapsed 80 ms >= 70 ms):
-    // contramarcha en reversa en rueda interna derecha para giro cerrado
-    controller.update(false, curveRight, 380);
-    ControllerOutputs outStage2 = controller.getOutputs();
-    TEST_ASSERT_FALSE(outStage2.isStopped);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outStage2.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outStage2.motors.rightPwm);
-    TEST_ASSERT_TRUE(outStage2.motors.leftForward);
-    TEST_ASSERT_FALSE(outStage2.motors.rightForward);
+    // t = 420 ms (elapsed 120 ms -> accelTime = 40 ms): +10 PWM -> 140
+    controller.update(false, centered, 420);
+    ControllerOutputs out420 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(140, out420.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(140 - LineFollowerController::TRIM_RIGHT, out420.motors.rightPwm);
+    TEST_ASSERT_TRUE(out420.motors.leftForward);
+    TEST_ASSERT_TRUE(out420.motors.rightForward);
+
+    // t = 460 ms (elapsed 160 ms -> accelTime = 80 ms): +20 PWM -> 150
+    controller.update(false, centered, 460);
+    ControllerOutputs out460 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(150, out460.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(150 - LineFollowerController::TRIM_RIGHT, out460.motors.rightPwm);
+
+    // t = 500 ms (elapsed 200 ms -> accelTime = 120 ms): +30 PWM -> 160
+    controller.update(false, centered, 500);
+    ControllerOutputs out500 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(160, out500.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(160 - LineFollowerController::TRIM_RIGHT, out500.motors.rightPwm);
+
+    // t = 700 ms (elapsed 400 ms -> accelTime = 320 ms): topado en MAX_STRAIGHT_SPEED 180
+    controller.update(false, centered, 700);
+    ControllerOutputs out700 = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, out700.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED - LineFollowerController::TRIM_RIGHT, out700.motors.rightPwm);
 }
 
-void test_right_drift_steers_left_smoothly_forward(void) {
+void test_etapa1_soft_differential_steering_drift_right(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    // Curva a la izquierda / desvío a la derecha: sensor izquierdo toca la línea blanca
-    SensorInputs curveLeft = {true, false};
+    // [0, 1, 0, 0]: Desvío leve a la derecha -> rueda interna izq forward a CURVE_SPEED, externa der forward a BASE_SPEED
+    SensorInputs driftRight = {false, true, false, false};
+    controller.update(false, driftRight, 300);
 
-    // Stage 1 (t = 300 ms start, check at 320 ms, elapsed 20 ms < 70 ms):
-    // frenado suave inicial (PWM 0) y ambos motores hacia adelante (anti-zigzag)
-    controller.update(false, curveLeft, 300);
-    controller.update(false, curveLeft, 320);
-    ControllerOutputs outStage1 = controller.getOutputs();
-    TEST_ASSERT_FALSE(outStage1.isStopped);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outStage1.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outStage1.motors.rightPwm);
-    TEST_ASSERT_TRUE(outStage1.motors.leftForward);
-    TEST_ASSERT_TRUE(outStage1.motors.rightForward);
+    ControllerOutputs out = controller.getOutputs();
+    TEST_ASSERT_FALSE(out.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::LEFT);
+}
 
-    // Stage 2 (t = 380 ms, elapsed 80 ms >= 70 ms):
-    // contramarcha en reversa en rueda interna izquierda para giro cerrado
-    controller.update(false, curveLeft, 380);
-    ControllerOutputs outStage2 = controller.getOutputs();
-    TEST_ASSERT_FALSE(outStage2.isStopped);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outStage2.motors.leftPwm);
-    TEST_ASSERT_FALSE(outStage2.motors.leftForward);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outStage2.motors.rightPwm);
-    TEST_ASSERT_TRUE(outStage2.motors.rightForward);
+void test_etapa1_soft_differential_steering_drift_left(void) {
+    LineFollowerController controller;
+    start_racing(controller);
+
+    // [0, 0, 1, 0]: Desvío leve a la izquierda -> externa izq forward a BASE_SPEED, interna der forward a CURVE_SPEED
+    SensorInputs driftLeft = {false, false, true, false};
+    controller.update(false, driftLeft, 300);
+
+    ControllerOutputs out = controller.getOutputs();
+    TEST_ASSERT_FALSE(out.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
+    TEST_ASSERT_TRUE(out.motors.leftForward);
+    TEST_ASSERT_TRUE(out.motors.rightForward);
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::RIGHT);
+}
+
+void test_etapa2_sharp_steering_left_immediate_counter_rotation(void) {
+    LineFollowerController controller;
+    start_racing(controller);
+
+    // [1, 0, 0, 0]: Curva cerrada izquierda (S1 exterior izquierdo activo)
+    SensorInputs sharpLeft1 = {true, false, false, false};
+    controller.update(false, sharpLeft1, 300);
+
+    ControllerOutputs out1 = controller.getOutputs();
+    TEST_ASSERT_FALSE(out1.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out1.motors.leftPwm);
+    TEST_ASSERT_FALSE(out1.motors.leftForward); // Contramarcha rueda interna
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out1.motors.rightPwm);
+    TEST_ASSERT_TRUE(out1.motors.rightForward); // Rueda externa hacia adelante
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::LEFT);
+
+    // [1, 1, 0, 0]: Curva cerrada izquierda con S1 y S2 activos
+    SensorInputs sharpLeft2 = {true, true, false, false};
+    controller.update(false, sharpLeft2, 310);
+
+    ControllerOutputs out2 = controller.getOutputs();
+    TEST_ASSERT_FALSE(out2.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out2.motors.leftPwm);
+    TEST_ASSERT_FALSE(out2.motors.leftForward);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out2.motors.rightPwm);
+    TEST_ASSERT_TRUE(out2.motors.rightForward);
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::LEFT);
+}
+
+void test_etapa2_sharp_steering_right_immediate_counter_rotation(void) {
+    LineFollowerController controller;
+    start_racing(controller);
+
+    // [0, 0, 0, 1]: Curva cerrada derecha (S4 exterior derecho activo)
+    SensorInputs sharpRight1 = {false, false, false, true};
+    controller.update(false, sharpRight1, 300);
+
+    ControllerOutputs out1 = controller.getOutputs();
+    TEST_ASSERT_FALSE(out1.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out1.motors.leftPwm);
+    TEST_ASSERT_TRUE(out1.motors.leftForward); // Rueda externa hacia adelante
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out1.motors.rightPwm);
+    TEST_ASSERT_FALSE(out1.motors.rightForward); // Contramarcha rueda interna
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::RIGHT);
+
+    // [0, 0, 1, 1]: Curva cerrada derecha con S3 y S4 activos
+    SensorInputs sharpRight2 = {false, false, true, true};
+    controller.update(false, sharpRight2, 310);
+
+    ControllerOutputs out2 = controller.getOutputs();
+    TEST_ASSERT_FALSE(out2.isStopped);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out2.motors.leftPwm);
+    TEST_ASSERT_TRUE(out2.motors.leftForward);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out2.motors.rightPwm);
+    TEST_ASSERT_FALSE(out2.motors.rightForward);
+    TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::RIGHT);
+}
+
+void test_curve_entry_instantly_cancels_straightaway_speed_boost(void) {
+    LineFollowerController controller;
+    SensorInputs centered = {false, true, true, false};
+
+    controller.update(true, centered, 200);
+    controller.update(false, centered, 300);
+
+    // Acelerar en recta hasta velocidad máxima (180)
+    controller.update(false, centered, 1000);
+    ControllerOutputs outCruise = controller.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, outCruise.motors.leftPwm);
+
+    // Entrada a curva suave a la derecha [0, 0, 1, 0]
+    SensorInputs driftLeft = {false, false, true, false};
+    controller.update(false, driftLeft, 1010);
+    ControllerOutputs outCurve = controller.getOutputs();
+
+    // Velocidad se resetea de inmediato a BASE_SPEED (130) en externa, CURVE_SPEED en interna
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outCurve.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outCurve.motors.rightPwm);
 }
 
 void test_transverse_mark_continues_straight_ahead(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    // Marca transversal de largada/meta: ambos sensores tocan la línea blanca
-    SensorInputs transverse = {true, true};
+    // [1, 1, 1, 1]: Marca transversal / largada
+    SensorInputs transverse = {true, true, true, true};
     controller.update(false, transverse, 300);
 
     ControllerOutputs outputs = controller.getOutputs();
@@ -198,281 +293,212 @@ void test_transverse_mark_continues_straight_ahead(void) {
     TEST_ASSERT_TRUE(outputs.motors.rightForward);
 }
 
-void test_counter_rotation_strictly_excluded_in_active_cruising(void) {
-    LineFollowerController controller;
-    start_racing(controller);
+void test_rescuing_state_entry_and_maintains_last_detected_direction(void) {
+    // 1. Rescate tras giro a la derecha
+    {
+        LineFollowerController controller;
+        start_racing(controller);
 
-    // En avance recto y marcas transversales ambas ruedas deben avanzar siempre hacia adelante,
-    // incluso a través de múltiples ciclos de tiempo superiores a REVERSE_ENGAGEMENT_DELAY_MS
-    SensorInputs forwardScenarios[] = {
-        {false, false}, // Centered (line in middle)
-        {true, true}    // Transverse mark
-    };
+        SensorInputs curveRight = {false, false, true, false};
+        controller.update(false, curveRight, 300);
+        TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::RIGHT);
 
-    for (size_t i = 0; i < sizeof(forwardScenarios)/sizeof(forwardScenarios[0]); ++i) {
-        for (uint32_t t = 300; t <= 500; t += 50) {
-            controller.update(false, forwardScenarios[i], t + (uint32_t)i * 1000);
-            ControllerOutputs outputs = controller.getOutputs();
-            TEST_ASSERT_FALSE(outputs.isStopped);
-            TEST_ASSERT_TRUE_MESSAGE(outputs.motors.leftForward, "Left motor counter-rotation detected in straight cruise!");
-            TEST_ASSERT_TRUE_MESSAGE(outputs.motors.rightForward, "Right motor counter-rotation detected in straight cruise!");
-        }
+        // Pérdida total de pista [0, 0, 0, 0] a t = 350 ms
+        SensorInputs lost = {false, false, false, false};
+        controller.update(false, lost, 350);
+
+        TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
+        ControllerOutputs out = controller.getOutputs();
+        TEST_ASSERT_FALSE(out.isStopped);
+        TEST_ASSERT_TRUE(out.indicatorActive);
+        // Gira hacia la derecha (rueda izq fwd a BASE_SPEED, rueda der rev a TURN_REVERSE_PWM)
+        TEST_ASSERT_TRUE(out.motors.leftForward);
+        TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
+        TEST_ASSERT_FALSE(out.motors.rightForward);
+        TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
+    }
+
+    // 2. Rescate tras giro a la izquierda
+    {
+        LineFollowerController controller;
+        start_racing(controller);
+
+        SensorInputs curveLeft = {false, true, false, false};
+        controller.update(false, curveLeft, 300);
+        TEST_ASSERT_TRUE(controller.getActiveTurn() == LineFollowerController::ActiveTurn::LEFT);
+
+        // Pérdida total de pista [0, 0, 0, 0] a t = 350 ms
+        SensorInputs lost = {false, false, false, false};
+        controller.update(false, lost, 350);
+
+        TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
+        ControllerOutputs out = controller.getOutputs();
+        TEST_ASSERT_FALSE(out.isStopped);
+        TEST_ASSERT_TRUE(out.indicatorActive);
+        // Gira hacia la izquierda (rueda izq rev a TURN_REVERSE_PWM, rueda der fwd a BASE_SPEED - TRIM_RIGHT)
+        TEST_ASSERT_FALSE(out.motors.leftForward);
+        TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.leftPwm);
+        TEST_ASSERT_TRUE(out.motors.rightForward);
+        TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
     }
 }
 
-void test_unified_track_polarity_normalization(void) {
-    // WHITE_LINE: 0 (LOW) is line detected, 1 (HIGH) is background
-    SensorInputs wCentered = LineFollowerController::normalizeSensors(0, 0, TrackPolarity::WHITE_LINE);
-    TEST_ASSERT_TRUE(wCentered.leftDetected);
-    TEST_ASSERT_TRUE(wCentered.rightDetected);
-
-    SensorInputs wLeftDrift = LineFollowerController::normalizeSensors(1, 0, TrackPolarity::WHITE_LINE);
-    TEST_ASSERT_FALSE(wLeftDrift.leftDetected);
-    TEST_ASSERT_TRUE(wLeftDrift.rightDetected);
-
-    SensorInputs wRightDrift = LineFollowerController::normalizeSensors(0, 1, TrackPolarity::WHITE_LINE);
-    TEST_ASSERT_TRUE(wRightDrift.leftDetected);
-    TEST_ASSERT_FALSE(wRightDrift.rightDetected);
-
-    SensorInputs wBothLost = LineFollowerController::normalizeSensors(1, 1, TrackPolarity::WHITE_LINE);
-    TEST_ASSERT_FALSE(wBothLost.leftDetected);
-    TEST_ASSERT_FALSE(wBothLost.rightDetected);
-
-    // BLACK_LINE: 1 (HIGH) is line detected, 0 (LOW) is background
-    SensorInputs bCentered = LineFollowerController::normalizeSensors(1, 1, TrackPolarity::BLACK_LINE);
-    TEST_ASSERT_TRUE(bCentered.leftDetected);
-    TEST_ASSERT_TRUE(bCentered.rightDetected);
-
-    SensorInputs bLeftDrift = LineFollowerController::normalizeSensors(0, 1, TrackPolarity::BLACK_LINE);
-    TEST_ASSERT_FALSE(bLeftDrift.leftDetected);
-    TEST_ASSERT_TRUE(bLeftDrift.rightDetected);
-
-    SensorInputs bRightDrift = LineFollowerController::normalizeSensors(1, 0, TrackPolarity::BLACK_LINE);
-    TEST_ASSERT_TRUE(bRightDrift.leftDetected);
-    TEST_ASSERT_FALSE(bRightDrift.rightDetected);
-
-    SensorInputs bBothLost = LineFollowerController::normalizeSensors(0, 0, TrackPolarity::BLACK_LINE);
-    TEST_ASSERT_FALSE(bBothLost.leftDetected);
-    TEST_ASSERT_FALSE(bBothLost.rightDetected);
-}
-
-void test_navigation_commands_across_both_track_polarities(void) {
-    // 1. Controller configured for WHITE_LINE (0 = white line, 1 = dark background)
-    LineFollowerController whiteController(TrackPolarity::WHITE_LINE);
-    start_racing(whiteController);
-
-    // White line in middle (both sensors read 1 / HIGH on dark background) -> straight cruise
-    whiteController.updateRaw(false, 1, 1, 300);
-    ControllerOutputs out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve right Stage 1 (t = 350 ms, elapsed 0 ms < 70 ms): mild brake forward
-    whiteController.updateRaw(false, 1, 0, 350);
-    out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve right Stage 2 (t = 430 ms, elapsed 80 ms >= 70 ms): reverse counter-rotation
-    whiteController.updateRaw(false, 1, 0, 430);
-    out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_FALSE(out.motors.rightForward);
-
-    // Curve left Stage 1 (t = 500 ms, elapsed 0 ms < 70 ms): mild brake forward
-    whiteController.updateRaw(false, 0, 1, 500);
-    out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve left Stage 2 (t = 580 ms, elapsed 80 ms >= 70 ms): reverse counter-rotation
-    whiteController.updateRaw(false, 0, 1, 580);
-    out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.leftPwm);
-    TEST_ASSERT_FALSE(out.motors.leftForward);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Transverse line (both sensors read 0 / LOW) -> continues straight ahead
-    whiteController.updateRaw(false, 0, 0, 650);
-    out = whiteController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // 2. Controller configured for BLACK_LINE (1 = black line, 0 = light background)
-    LineFollowerController blackController(TrackPolarity::BLACK_LINE);
-    start_racing(blackController);
-
-    // Black line in middle (both sensors read 0 / LOW on light background) -> straight cruise
-    blackController.updateRaw(false, 0, 0, 300);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve right Stage 1 (t = 350 ms, elapsed 0 ms < 70 ms): mild brake forward
-    blackController.updateRaw(false, 0, 1, 350);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve right Stage 2 (t = 430 ms, elapsed 80 ms >= 70 ms): reverse counter-rotation
-    blackController.updateRaw(false, 0, 1, 430);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_FALSE(out.motors.rightForward);
-
-    // Curve left Stage 1 (t = 500 ms, elapsed 0 ms < 70 ms): mild brake forward
-    blackController.updateRaw(false, 1, 0, 500);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Curve left Stage 2 (t = 580 ms, elapsed 80 ms >= 70 ms): reverse counter-rotation
-    blackController.updateRaw(false, 1, 0, 580);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.leftPwm);
-    TEST_ASSERT_FALSE(out.motors.leftForward);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-
-    // Transverse line (both sensors read 1 / HIGH) -> continues straight ahead
-    blackController.updateRaw(false, 1, 1, 650);
-    out = blackController.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-    TEST_ASSERT_TRUE(out.motors.leftForward);
-    TEST_ASSERT_TRUE(out.motors.rightForward);
-}
-
-void test_turn_timer_resets_when_re_centering(void) {
+void test_rescuing_line_recovery_resumes_racing_immediately(void) {
     LineFollowerController controller;
     start_racing(controller);
 
-    SensorInputs curveRight = {false, true};
-    SensorInputs centered = {false, false};
-
-    // 1. Initial veer right at t = 300 ms -> reaches stage 2 at t = 380 ms (80 ms >= 70 ms)
+    SensorInputs curveRight = {false, false, false, true};
     controller.update(false, curveRight, 300);
-    controller.update(false, curveRight, 380);
-    ControllerOutputs out = controller.getOutputs();
-    TEST_ASSERT_FALSE(out.motors.rightForward); // In stage 2 reverse
 
-    // 2. Robot successfully re-centers onto line at t = 400 ms
-    controller.update(false, centered, 400);
-    out = controller.getOutputs();
+    // Despiste [0, 0, 0, 0] a t = 350 ms
+    SensorInputs lost = {false, false, false, false};
+    controller.update(false, lost, 350);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
+
+    // Recupera línea a t = 450 ms (100 ms transcurridos < 200 ms) con centrado [0, 1, 1, 0]
+    SensorInputs recovered = {false, true, true, false};
+    controller.update(false, recovered, 450);
+
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+    ControllerOutputs out = controller.getOutputs();
+    TEST_ASSERT_FALSE(out.isStopped);
+    TEST_ASSERT_TRUE(out.indicatorActive);
     TEST_ASSERT_TRUE(out.motors.leftForward);
     TEST_ASSERT_TRUE(out.motors.rightForward);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
     TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out.motors.rightPwm);
-
-    // 3. Robot veers right again at t = 450 ms -> should enter Stage 1, NOT Stage 2!
-    controller.update(false, curveRight, 450);
-    controller.update(false, curveRight, 470); // elapsed 20 ms < 70 ms
-    out = controller.getOutputs();
-    TEST_ASSERT_TRUE_MESSAGE(out.motors.rightForward, "Turn timer was not reset upon re-centering; premature reverse engaged!");
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, out.motors.rightPwm);
-
-    // 4. Staying on curve until t = 530 ms (80 ms >= 70 ms) engages Stage 2 cleanly
-    controller.update(false, curveRight, 530);
-    out = controller.getOutputs();
-    TEST_ASSERT_FALSE(out.motors.rightForward);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, out.motors.rightPwm);
 }
 
-void test_straightaway_progressive_acceleration(void) {
+void test_emergency_stop_after_rescue_timeout_exceeded(void) {
     LineFollowerController controller;
-    SensorInputs centered = {false, false};
+    start_racing(controller);
 
-    // Driver holds button on starting grid
-    controller.update(true, centered, 200);
-    // Referee gives start signal -> button released at t = 300 ms (starts racing)
-    controller.update(false, centered, 300);
-    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+    SensorInputs curveLeft = {true, false, false, false};
+    controller.update(false, curveLeft, 300);
 
-    // At t = 400 ms (elapsed 100 ms <= 150 ms): initial cruise window, leftPwm = BASE_SPEED (135), rightPwm = 115
-    controller.update(false, centered, 400);
-    ControllerOutputs out400 = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, out400.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, out400.motors.rightPwm);
-    TEST_ASSERT_TRUE(out400.motors.leftForward);
-    TEST_ASSERT_TRUE(out400.motors.rightForward);
+    // Despiste [0, 0, 0, 0] a t = 350 ms -> rescueStartTimeMs = 350
+    SensorInputs lost = {false, false, false, false};
+    controller.update(false, lost, 350);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
 
-    // At t = 500 ms (elapsed 200 ms -> 50 ms in acceleration): leftPwm = 140, rightPwm = 120
-    controller.update(false, centered, 500);
-    ControllerOutputs out500 = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(140, out500.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(120, out500.motors.rightPwm);
-    TEST_ASSERT_TRUE(out500.motors.leftForward);
-    TEST_ASSERT_TRUE(out500.motors.rightForward);
+    // A t = 540 ms (190 ms <= 200 ms): continúa en RESCUING
+    controller.update(false, lost, 540);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
+    TEST_ASSERT_FALSE(controller.getOutputs().isStopped);
+    TEST_ASSERT_TRUE(controller.getOutputs().indicatorActive);
 
-    // At t = 600 ms (elapsed 300 ms -> 150 ms in acceleration): leftPwm = 150, rightPwm = 130
-    controller.update(false, centered, 600);
-    ControllerOutputs out600 = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(150, out600.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(130, out600.motors.rightPwm);
-    TEST_ASSERT_TRUE(out600.motors.leftForward);
-    TEST_ASSERT_TRUE(out600.motors.rightForward);
+    // A t = 550 ms (200 ms <= 200 ms): continúa en RESCUING
+    controller.update(false, lost, 550);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::RESCUING);
 
-    // At t = 1000 ms (elapsed 700 ms): leftPwm capped at MAX_STRAIGHT_SPEED (180), rightPwm = 160
-    controller.update(false, centered, 1000);
-    ControllerOutputs out1000 = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, out1000.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED - LineFollowerController::TRIM_RIGHT, out1000.motors.rightPwm);
-    TEST_ASSERT_TRUE(out1000.motors.leftForward);
-    TEST_ASSERT_TRUE(out1000.motors.rightForward);
+    // A t = 551 ms (201 ms > 200 ms): TRANSICIÓN A EMERGENCY_STOP
+    controller.update(false, lost, 551);
+    TEST_ASSERT_TRUE(controller.getState() == RobotState::EMERGENCY_STOP);
+    ControllerOutputs outStop = controller.getOutputs();
+    TEST_ASSERT_TRUE(outStop.isStopped);
+    TEST_ASSERT_FALSE(outStop.indicatorActive);
+    TEST_ASSERT_EQUAL_UINT8(0, outStop.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(0, outStop.motors.rightPwm);
 }
 
-void test_curve_entry_instantly_cancels_straightaway_speed_boost(void) {
-    LineFollowerController controller;
-    SensorInputs centered = {false, false};
+void test_unified_track_polarity_normalization(void) {
+    // WHITE_LINE: 0 (LOW) es línea detectada, 1 (HIGH) es fondo oscuro
+    SensorInputs wCentered = LineFollowerController::normalizeSensors(1, 0, 0, 1, TrackPolarity::WHITE_LINE);
+    TEST_ASSERT_FALSE(wCentered.s1_outerLeft);
+    TEST_ASSERT_TRUE(wCentered.s2_innerLeft);
+    TEST_ASSERT_TRUE(wCentered.s3_innerRight);
+    TEST_ASSERT_FALSE(wCentered.s4_outerRight);
 
-    // Driver holds button and releases at t = 300 ms to start racing
-    controller.update(true, centered, 200);
-    controller.update(false, centered, 300);
-    TEST_ASSERT_TRUE(controller.getState() == RobotState::RACING);
+    SensorInputs wDriftRight = LineFollowerController::normalizeSensors(1, 0, 1, 1, TrackPolarity::WHITE_LINE);
+    TEST_ASSERT_FALSE(wDriftRight.s1_outerLeft);
+    TEST_ASSERT_TRUE(wDriftRight.s2_innerLeft);
+    TEST_ASSERT_FALSE(wDriftRight.s3_innerRight);
+    TEST_ASSERT_FALSE(wDriftRight.s4_outerRight);
 
-    // Accelerate on straightaway up to 180 (at t = 1000 ms)
-    controller.update(false, centered, 1000);
-    ControllerOutputs outCruise = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED, outCruise.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::MAX_STRAIGHT_SPEED - LineFollowerController::TRIM_RIGHT, outCruise.motors.rightPwm);
+    SensorInputs wSharpLeft = LineFollowerController::normalizeSensors(0, 1, 1, 1, TrackPolarity::WHITE_LINE);
+    TEST_ASSERT_TRUE(wSharpLeft.s1_outerLeft);
+    TEST_ASSERT_FALSE(wSharpLeft.s2_innerLeft);
+    TEST_ASSERT_FALSE(wSharpLeft.s3_innerRight);
+    TEST_ASSERT_FALSE(wSharpLeft.s4_outerRight);
 
-    // At t = 1010 ms, enter curve right ({false, true})
-    SensorInputs curveRight = {false, true};
-    controller.update(false, curveRight, 1010);
-    ControllerOutputs outCurveStage1 = controller.getOutputs();
-    // Verify left motor immediately drops to BASE_SPEED (135) - NOT 180! And right motor applies Stage 1 (0)
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outCurveStage1.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::CURVE_SPEED, outCurveStage1.motors.rightPwm);
-    TEST_ASSERT_TRUE(outCurveStage1.motors.leftForward);
-    TEST_ASSERT_TRUE(outCurveStage1.motors.rightForward);
+    SensorInputs wTransverse = LineFollowerController::normalizeSensors(0, 0, 0, 0, TrackPolarity::WHITE_LINE);
+    TEST_ASSERT_TRUE(wTransverse.s1_outerLeft);
+    TEST_ASSERT_TRUE(wTransverse.s2_innerLeft);
+    TEST_ASSERT_TRUE(wTransverse.s3_innerRight);
+    TEST_ASSERT_TRUE(wTransverse.s4_outerRight);
 
-    // At t = 1090 ms (80 ms into curve >= 70 ms), right motor engages Stage 2 reverse (90), left motor remains BASE_SPEED (135)
-    controller.update(false, curveRight, 1090);
-    ControllerOutputs outCurveStage2 = controller.getOutputs();
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outCurveStage2.motors.leftPwm);
-    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outCurveStage2.motors.rightPwm);
-    TEST_ASSERT_TRUE(outCurveStage2.motors.leftForward);
-    TEST_ASSERT_FALSE(outCurveStage2.motors.rightForward);
+    SensorInputs wLost = LineFollowerController::normalizeSensors(1, 1, 1, 1, TrackPolarity::WHITE_LINE);
+    TEST_ASSERT_FALSE(wLost.s1_outerLeft);
+    TEST_ASSERT_FALSE(wLost.s2_innerLeft);
+    TEST_ASSERT_FALSE(wLost.s3_innerRight);
+    TEST_ASSERT_FALSE(wLost.s4_outerRight);
+
+    // BLACK_LINE: 1 (HIGH) es línea detectada, 0 (LOW) es fondo claro
+    SensorInputs bCentered = LineFollowerController::normalizeSensors(0, 1, 1, 0, TrackPolarity::BLACK_LINE);
+    TEST_ASSERT_FALSE(bCentered.s1_outerLeft);
+    TEST_ASSERT_TRUE(bCentered.s2_innerLeft);
+    TEST_ASSERT_TRUE(bCentered.s3_innerRight);
+    TEST_ASSERT_FALSE(bCentered.s4_outerRight);
+
+    SensorInputs bDriftRight = LineFollowerController::normalizeSensors(0, 1, 0, 0, TrackPolarity::BLACK_LINE);
+    TEST_ASSERT_FALSE(bDriftRight.s1_outerLeft);
+    TEST_ASSERT_TRUE(bDriftRight.s2_innerLeft);
+    TEST_ASSERT_FALSE(bDriftRight.s3_innerRight);
+    TEST_ASSERT_FALSE(bDriftRight.s4_outerRight);
+
+    SensorInputs bSharpRight = LineFollowerController::normalizeSensors(0, 0, 0, 1, TrackPolarity::BLACK_LINE);
+    TEST_ASSERT_FALSE(bSharpRight.s1_outerLeft);
+    TEST_ASSERT_FALSE(bSharpRight.s2_innerLeft);
+    TEST_ASSERT_FALSE(bSharpRight.s3_innerRight);
+    TEST_ASSERT_TRUE(bSharpRight.s4_outerRight);
+
+    SensorInputs bLost = LineFollowerController::normalizeSensors(0, 0, 0, 0, TrackPolarity::BLACK_LINE);
+    TEST_ASSERT_FALSE(bLost.s1_outerLeft);
+    TEST_ASSERT_FALSE(bLost.s2_innerLeft);
+    TEST_ASSERT_FALSE(bLost.s3_innerRight);
+    TEST_ASSERT_FALSE(bLost.s4_outerRight);
+}
+
+void test_navigation_commands_across_both_track_polarities(void) {
+    // 1. WHITE_LINE (0 = activo, 1 = inactivo)
+    LineFollowerController whiteController(TrackPolarity::WHITE_LINE);
+    start_racing(whiteController);
+
+    // Centrado: S1=1, S2=0, S3=0, S4=1
+    whiteController.updateRaw(false, 1, 0, 0, 1, 300);
+    ControllerOutputs outW = whiteController.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outW.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outW.motors.rightPwm);
+    TEST_ASSERT_TRUE(outW.motors.leftForward);
+    TEST_ASSERT_TRUE(outW.motors.rightForward);
+
+    // Curva cerrada derecha S4 activo: S1=1, S2=1, S3=1, S4=0
+    whiteController.updateRaw(false, 1, 1, 1, 0, 350);
+    outW = whiteController.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outW.motors.leftPwm);
+    TEST_ASSERT_TRUE(outW.motors.leftForward);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outW.motors.rightPwm);
+    TEST_ASSERT_FALSE(outW.motors.rightForward);
+
+    // 2. BLACK_LINE (1 = activo, 0 = inactivo)
+    LineFollowerController blackController(TrackPolarity::BLACK_LINE);
+    start_racing(blackController);
+
+    // Centrado: S1=0, S2=1, S3=1, S4=0
+    blackController.updateRaw(false, 0, 1, 1, 0, 300);
+    ControllerOutputs outB = blackController.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED, outB.motors.leftPwm);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outB.motors.rightPwm);
+    TEST_ASSERT_TRUE(outB.motors.leftForward);
+    TEST_ASSERT_TRUE(outB.motors.rightForward);
+
+    // Curva cerrada izquierda S1 activo: S1=1, S2=0, S3=0, S4=0
+    blackController.updateRaw(false, 1, 0, 0, 0, 350);
+    outB = blackController.getOutputs();
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::TURN_REVERSE_PWM, outB.motors.leftPwm);
+    TEST_ASSERT_FALSE(outB.motors.leftForward);
+    TEST_ASSERT_EQUAL_UINT8(LineFollowerController::BASE_SPEED - LineFollowerController::TRIM_RIGHT, outB.motors.rightPwm);
+    TEST_ASSERT_TRUE(outB.motors.rightForward);
 }
 
 int main(int argc, char **argv) {
@@ -483,15 +509,18 @@ int main(int argc, char **argv) {
     RUN_TEST(test_button_pressed_and_held_maintains_standby);
     RUN_TEST(test_button_released_transitions_immediately_to_racing_with_indicator);
     RUN_TEST(test_racing_state_persists_after_button_release);
-    RUN_TEST(test_straight_cruising_applies_base_speed_with_trim);
-    RUN_TEST(test_left_drift_steers_right_smoothly_forward);
-    RUN_TEST(test_right_drift_steers_left_smoothly_forward);
+    RUN_TEST(test_centered_cruising_applies_base_speed_with_trim);
+    RUN_TEST(test_straightaway_progressive_acceleration);
+    RUN_TEST(test_etapa1_soft_differential_steering_drift_right);
+    RUN_TEST(test_etapa1_soft_differential_steering_drift_left);
+    RUN_TEST(test_etapa2_sharp_steering_left_immediate_counter_rotation);
+    RUN_TEST(test_etapa2_sharp_steering_right_immediate_counter_rotation);
+    RUN_TEST(test_curve_entry_instantly_cancels_straightaway_speed_boost);
     RUN_TEST(test_transverse_mark_continues_straight_ahead);
-    RUN_TEST(test_counter_rotation_strictly_excluded_in_active_cruising);
+    RUN_TEST(test_rescuing_state_entry_and_maintains_last_detected_direction);
+    RUN_TEST(test_rescuing_line_recovery_resumes_racing_immediately);
+    RUN_TEST(test_emergency_stop_after_rescue_timeout_exceeded);
     RUN_TEST(test_unified_track_polarity_normalization);
     RUN_TEST(test_navigation_commands_across_both_track_polarities);
-    RUN_TEST(test_turn_timer_resets_when_re_centering);
-    RUN_TEST(test_straightaway_progressive_acceleration);
-    RUN_TEST(test_curve_entry_instantly_cancels_straightaway_speed_boost);
     return UNITY_END();
 }

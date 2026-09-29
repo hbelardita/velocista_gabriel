@@ -36,48 +36,56 @@ All navigation logic, safety timeouts, steering kinematics, and race state trans
 ```cpp
 // Pure domain types representing the seam
 struct SensorInputs {
-  bool leftDetected;
-  bool rightDetected;
+    bool s1_outerLeft;
+    bool s2_innerLeft;
+    bool s3_innerRight;
+    bool s4_outerRight;
 };
 
 struct MotorOutputs {
-  uint8_t leftPwm;
-  uint8_t rightPwm;
-  bool leftForward;
-  bool rightForward;
+    uint8_t leftPwm;
+    uint8_t rightPwm;
+    bool leftForward;
+    bool rightForward;
 };
 
 struct ControllerOutputs {
-  MotorOutputs motors;
-  bool indicatorActive;
-  bool isStopped;
+    MotorOutputs motors;
+    bool indicatorActive;
+    bool isStopped;
 };
 
 enum class RobotState {
-  STANDBY,
-  RACING,
-  RESCUING,
-  EMERGENCY_STOP
+    STANDBY,
+    RACING,
+    RESCUING,
+    EMERGENCY_STOP
 };
 ```
 
 ### 2. State Machine and Start Routine
 - `STANDBY`: Initial state upon boot. The indicator LED remains OFF and motors remain stopped (`PWM = 0`). The controller waits for the start button to transition from pressed (`LOW` on `INPUT_PULLUP`) to released (`HIGH`).
-- `RACING`: Active navigation state. The indicator LED is energized (`HIGH`). Forward differential steering guides the robot along the line.
-- `RESCUING`: Entered when both sensors simultaneously lose the line while in `RACING`. A timer records elapsed loss time while maintaining differential steering toward the last active sensor.
-- `EMERGENCY_STOP`: Entered if track loss duration exceeds 200 ms. Both motors are cut (`PWM = 0`), and the indicator LED is deactivated.
+- `RACING`: Active navigation state. The indicator LED is energized (`HIGH`). Two-stage spatial steering guides the robot along the line.
+- `RESCUING`: Entered when all 4 sensors simultaneously lose the line (`[0, 0, 0, 0]`) while in `RACING`. A timer records `rescueStartTimeMs` while maintaining a counter-rotation turn toward the last active turn direction for at most 200 ms. If any sensor reacquires the line within 200 ms, the controller resumes `RACING` immediately.
+- `EMERGENCY_STOP`: Entered if track loss duration exceeds 200 ms (`currentTimeMs - rescueStartTimeMs > 200 ms`). Both motors are cut (`PWM = 0`), and the indicator LED is deactivated.
 
-### 3. Kinematic Drive Logic
-- Straight cruise: Left motor at `BASE_SPEED`, right motor at `BASE_SPEED - TRIM_RIGHT`.
-- Steer left: Left wheel inner motor speed drops to `CURVE_SPEED` (`~35-40%` PWM) forward; right wheel outer motor maintains `BASE_SPEED - TRIM_RIGHT` forward.
-- Steer right: Left wheel outer motor maintains `BASE_SPEED` forward; right wheel inner motor drops to `CURVE_SPEED` forward.
-- Reverse gear / counter-rotation is strictly forbidden during active navigation to protect the plastic gearbox assembly of the yellow DC motors.
+### 3. Spatial Two-Stage Steering Logic
+Steering is determined by physical sensor geometry (50 mm span, S2-S3 riding inside the 20 mm line, S1-S4 outside), eliminating arbitrary time delays:
+- **Centered (`[0, 1, 1, 0]`):** Both inner sensors on the line. Straight cruise with progressive acceleration (`BASE_SPEED` to `MAX_STRAIGHT_SPEED`). Left motor at `currentSpeed`, right motor at `currentSpeed - TRIM_RIGHT`.
+- **Etapa 1 - Soft Forward Differential Turn (slight drift):**
+  - Slight drift right (`[0, 1, 0, 0]`): Steer left smoothly. Inner left wheel forward at `CURVE_SPEED`, outer right wheel forward at `BASE_SPEED - TRIM_RIGHT`.
+  - Slight drift left (`[0, 0, 1, 0]`): Steer right smoothly. Outer left wheel forward at `BASE_SPEED`, inner right wheel forward at `CURVE_SPEED`.
+- **Etapa 2 - Sharp Turn with Counter-Rotation (sharp curves / 30 cm radius):**
+  - Sharp curve left (`[1, 0, 0, 0]` or `[1, 1, 0, 0]`): Immediate counter-rotation turn left. Outer right wheel forward at `BASE_SPEED - TRIM_RIGHT`, inner left wheel in reverse at `TURN_REVERSE_PWM`.
+  - Sharp curve right (`[0, 0, 0, 1]` or `[0, 0, 1, 1]`): Immediate counter-rotation turn right. Outer left wheel forward at `BASE_SPEED`, inner right wheel in reverse at `TURN_REVERSE_PWM`.
+- **Transverse Mark / Cross (`[1, 1, 1, 1]`):** All sensors detect line. Cruise forward at `BASE_SPEED` without acceleration boost.
+- **Track Loss (`[0, 0, 0, 0]`):** Transitions to `RESCUING`. Applies counter-rotation turn in the last active direction for <= 200 ms. If reacquired, returns to `RACING`; if timed out, triggers `EMERGENCY_STOP`.
 
 ### 4. Hardware Adapter Layer
 The entry point (`main.cpp`) serves solely as an adapter at the outer perimeter:
-- Reads digital sensor pins and the start button pin.
-- Inverts sensor polarity according to the configured track setting.
-- Queries `millis()` and passes elapsed time and inputs to `LineFollowerController`.
+- Reads 4 digital sensor pins (S1 = A0, S2 = 2, S3 = 3, S4 = A1) and the start button pin.
+- Inverts sensor polarity according to the configured track setting (`WHITE_LINE` or `BLACK_LINE`).
+- Queries `millis()` and passes elapsed time and inputs to `LineFollowerController::updateRaw`.
 - Writes calculated PWM and direction signals to the motor driver pins and toggles the onboard indicator pin (`LED_BUILTIN`).
 
 ## Testing Decisions
@@ -89,16 +97,19 @@ The entry point (`main.cpp`) serves solely as an adapter at the outer perimeter:
 
 ### Test Scenarios
 - **Start Sequence Test**: Verify motors stay stopped while button is pressed; verify immediate transition to `RACING` with LED enabled on button release.
-- **Differential Steering Test**: Verify inner-wheel speed reduction occurs in the forward direction when one sensor leaves the line, maintaining outer-wheel speed.
-- **Rescue Window Timing Test**: Verify controller remains in `RESCUING` state applying last-direction turn for `< 200 ms`.
+- **Centered Cruise and Progressive Acceleration Test**: Verify centered sensor input (`[0, 1, 1, 0]`) cruises straight and ramps speed up to `MAX_STRAIGHT_SPEED`.
+- **Etapa 1 Differential Steering Test**: Verify inner-wheel speed reduction occurs in the forward direction on slight drift (`[0, 1, 0, 0]` and `[0, 0, 1, 0]`).
+- **Etapa 2 Sharp Steering Test**: Verify immediate counter-rotation engagement on outer sensor detection (`[1, 0, 0, 0]` and `[0, 0, 0, 1]`).
+- **Rescue Window Timing Test**: Verify controller remains in `RESCUING` state applying last-direction turn for `<= 200 ms`.
 - **Emergency Stop Expiry Test**: Verify controller cuts motors to zero and enters `EMERGENCY_STOP` when track loss exceeds `200 ms`.
 - **Track Recovery Test**: Verify controller seamlessly transitions from `RESCUING` back to `RACING` when any sensor reacquires the line before timeout.
+- **Transverse Crossing Test**: Verify straight-ahead cruise on `[1, 1, 1, 1]`.
 
 ## Out of Scope
 
 - Remote start control via IR or Bluetooth (Amateur standard relies strictly on manual start button).
-- PID control using analog reflectance values (two digital sensors dictate discrete differential states).
-- Multi-sensor array expansion beyond the initial 2-sensor layout (upgrade path documented in ADR 0001).
+- PID control using analog reflectance values (discrete digital array dictates 2-stage spatial differential states).
+- Multi-sensor array expansion beyond the 4-sensor array (4 sensors is the maximum allowed by Art 1.2.1).
 - Automatic lap counting or finish line detection sensors.
 
 ## Further Notes

@@ -11,9 +11,11 @@ const int ENB = 6;  // Pin PWM para velocidad derecha
 const int IN3 = 10; // Dirección derecha
 const int IN4 = 9;  // Dirección derecha
 
-// Pines de los sensores TCRT5000 (Digitales)
-const int SENSOR_IZQ = 2;
-const int SENSOR_DER = 3;
+// Pines de los sensores TCRT5000 (Arreglo discreto de 4 sensores)
+const int SENSOR_1_EXT_IZQ = A0;
+const int SENSOR_2_INT_IZQ = 2;
+const int SENSOR_3_INT_DER = 3;
+const int SENSOR_4_EXT_DER = A1;
 
 // Pin del pulsador de largada (término canónico según CONTEXT.md)
 const int PIN_PULSADOR_LARGADA = 7;
@@ -55,20 +57,19 @@ void applyOutputs(const ControllerOutputs& outputs) {
 
 #ifdef DEBUG_MODE
 const uint8_t DEBUG_MOTOR_PWM = 150;
-const uint8_t BASE_SPEED = 115;  // Debe coincidir con LineFollowerController::BASE_SPEED
 bool telemetryActive = false;
 unsigned long lastTelemetryMs = 0;
 
 void printDebugMenu() {
   Serial.println(F("\n=========================================="));
-  Serial.println(F("   VELOCISTA GABRIEL - MODO DEBUG"));
+  Serial.println(F("   VELOCISTA GABRIEL - MODO DEBUG (4 SENSORES)"));
   Serial.println(F("=========================================="));
   Serial.println(F("[1] Motor Izquierdo adelante (PWM 150)"));
   Serial.println(F("[2] Motor Derecho adelante (PWM 150)"));
   Serial.println(F("[3] Ambos Motores adelante (PWM 150)"));
   Serial.println(F("[s] Parar todos los motores"));
-  Serial.println(F("[4] Monitoreo continuo Sensores y Pulsador"));
-  Serial.println(F("[5] Test recta con trim (simula centrado)"));
+  Serial.println(F("[4] Monitoreo continuo 4 Sensores y Pulsador"));
+  Serial.println(F("[5] Test recta con trim (simula centrado [0,1,1,0])"));
   Serial.println(F("[m] Mostrar este menu"));
   Serial.println(F("=========================================="));
   Serial.print(F("Seleccione opcion: "));
@@ -126,12 +127,18 @@ void loopDebug() {
         break;
 
       case '5':
-        // Simular estado RACING con sensores centrados para ver PWM con trim
-        controller.updateRaw(false, 1, 1, millis());  // WHITE_LINE: 1 = fondo
+        // Simular estado RACING con sensores centrados [0, 1, 1, 0] para ver PWM con trim
+        // WHITE_LINE: 0 = línea, 1 = fondo -> raw: S1=1, S2=0, S3=0, S4=1
+        controller.updateRaw(false, 1, 0, 0, 1, millis());
         {
           ControllerOutputs out = controller.getOutputs();
           Serial.print(F("\n[TRIM TEST] Estado: "));
-          Serial.print(out.isStopped ? F("STOP") : F("RACING"));
+          switch (controller.getState()) {
+            case RobotState::STANDBY: Serial.print(F("STANDBY")); break;
+            case RobotState::RACING: Serial.print(F("RACING")); break;
+            case RobotState::RESCUING: Serial.print(F("RESCUING")); break;
+            case RobotState::EMERGENCY_STOP: Serial.print(F("EMERGENCY_STOP")); break;
+          }
           Serial.print(F(" | PWM Izq: "));
           Serial.print(out.motors.leftPwm);
           Serial.print(out.motors.leftForward ? F(" FWD") : F(" REV"));
@@ -139,7 +146,7 @@ void loopDebug() {
           Serial.print(out.motors.rightPwm);
           Serial.print(out.motors.rightForward ? F(" FWD") : F(" REV"));
           Serial.print(F(" | Trim aplicado: "));
-          Serial.print(BASE_SPEED - out.motors.rightPwm);
+          Serial.print(LineFollowerController::BASE_SPEED - out.motors.rightPwm);
           Serial.println();
         }
         break;
@@ -165,27 +172,41 @@ void loopDebug() {
       lastTelemetryMs = now;
 
       bool pulsadorPresionado = (digitalRead(PIN_PULSADOR_LARGADA) == LOW);
-      int rawIzq = digitalRead(SENSOR_IZQ);
-      int rawDer = digitalRead(SENSOR_DER);
-      SensorInputs norm = LineFollowerController::normalizeSensors(rawIzq, rawDer, POLARIDAD_PISTA);
+      int rawS1 = digitalRead(SENSOR_1_EXT_IZQ);
+      int rawS2 = digitalRead(SENSOR_2_INT_IZQ);
+      int rawS3 = digitalRead(SENSOR_3_INT_DER);
+      int rawS4 = digitalRead(SENSOR_4_EXT_DER);
+      SensorInputs norm = LineFollowerController::normalizeSensors(rawS1, rawS2, rawS3, rawS4, POLARIDAD_PISTA);
 
-      // Mostrar también salidas del controlador
       ControllerOutputs out = controller.getOutputs();
 
-      Serial.print(F("[SENSORES] Izq: "));
-      Serial.print(rawIzq);
-      Serial.print(norm.leftDetected ? F(" (LINEA)") : F(" (FONDO)"));
-      Serial.print(F(" | Der: "));
-      Serial.print(rawDer);
-      Serial.print(norm.rightDetected ? F(" (LINEA)") : F(" (FONDO)"));
+      Serial.print(F("[SENSORES] S1:"));
+      Serial.print(rawS1);
+      Serial.print(norm.s1_outerLeft ? F("(L)") : F("(F)"));
+      Serial.print(F(" S2:"));
+      Serial.print(rawS2);
+      Serial.print(norm.s2_innerLeft ? F("(L)") : F("(F)"));
+      Serial.print(F(" S3:"));
+      Serial.print(rawS3);
+      Serial.print(norm.s3_innerRight ? F("(L)") : F("(F)"));
+      Serial.print(F(" S4:"));
+      Serial.print(rawS4);
+      Serial.print(norm.s4_outerRight ? F("(L)") : F("(F)"));
       Serial.print(F(" | Pulsador: "));
       Serial.print(pulsadorPresionado ? F("PRESIONADO") : F("LIBRE"));
-      Serial.print(F(" | PWM Izq: "));
+      Serial.print(F(" | Estado: "));
+      switch (controller.getState()) {
+        case RobotState::STANDBY: Serial.print(F("STANDBY")); break;
+        case RobotState::RACING: Serial.print(F("RACING")); break;
+        case RobotState::RESCUING: Serial.print(F("RESCUING")); break;
+        case RobotState::EMERGENCY_STOP: Serial.print(F("EMERGENCY_STOP")); break;
+      }
+      Serial.print(F(" | PWM: "));
       Serial.print(out.motors.leftPwm);
-      Serial.print(out.motors.leftForward ? F(" FWD") : F(" REV"));
-      Serial.print(F(" | PWM Der: "));
+      Serial.print(out.motors.leftForward ? F("F") : F("R"));
+      Serial.print(F("/"));
       Serial.print(out.motors.rightPwm);
-      Serial.print(out.motors.rightForward ? F(" FWD") : F(" REV"));
+      Serial.print(out.motors.rightForward ? F("F") : F("R"));
       Serial.println();
     }
   }
@@ -201,9 +222,11 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  // Configuración de sensores
-  pinMode(SENSOR_IZQ, INPUT);
-  pinMode(SENSOR_DER, INPUT);
+  // Configuración de sensores (arreglo discreto de 4 sensores)
+  pinMode(SENSOR_1_EXT_IZQ, INPUT);
+  pinMode(SENSOR_2_INT_IZQ, INPUT);
+  pinMode(SENSOR_3_INT_DER, INPUT);
+  pinMode(SENSOR_4_EXT_DER, INPUT);
 
   // Configuración de pulsador de largada con pullup interno
   pinMode(PIN_PULSADOR_LARGADA, INPUT_PULLUP);
@@ -226,12 +249,14 @@ void loop() {
   // Lectura del pulsador de largada (activo en bajo por INPUT_PULLUP)
   bool pulsadorPresionado = (digitalRead(PIN_PULSADOR_LARGADA) == LOW);
 
-  // Lectura física de sensores ópticos TCRT5000
-  int rawIzq = digitalRead(SENSOR_IZQ);
-  int rawDer = digitalRead(SENSOR_DER);
+  // Lectura física de sensores ópticos TCRT5000 (S1..S4)
+  int rawS1 = digitalRead(SENSOR_1_EXT_IZQ);
+  int rawS2 = digitalRead(SENSOR_2_INT_IZQ);
+  int rawS3 = digitalRead(SENSOR_3_INT_DER);
+  int rawS4 = digitalRead(SENSOR_4_EXT_DER);
 
   // Actualización del controlador de dominio puro con normalización unificada
-  controller.updateRaw(pulsadorPresionado, rawIzq, rawDer, millis());
+  controller.updateRaw(pulsadorPresionado, rawS1, rawS2, rawS3, rawS4, millis());
 
   // Aplicar salidas calculadas al hardware
   applyOutputs(controller.getOutputs());
